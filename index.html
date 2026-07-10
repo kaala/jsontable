@@ -1,0 +1,836 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JSON TABLE EDITOR</title>
+  <script src="https://cdn.jsdelivr.net/npm/handsontable@14.6.0/dist/handsontable.full.min.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/handsontable@14.6.0/dist/handsontable.full.min.css">
+  <style>
+    body {
+      overflow-x: auto;
+      padding: 8px;
+    }
+
+    .slot {
+      margin: 4px;
+      border-left: 2px solid #e0e0e0;
+      padding-left: 12px;
+    }
+
+    .slot.slot-root {
+      margin: 0;
+      border-left: 0;
+      padding-left: 0;
+    }
+
+    .slot-title {
+      margin-bottom: 2px;
+    }
+
+    .slot-path {
+      font-weight: bold;
+      padding-right: 8px;
+    }
+
+    .slot .slot-textarea {
+      width: 480px;
+      height: 160px;
+      font-family: monospace;
+      font-size: 13px;
+      resize: both;
+      padding: 4px;
+    }
+
+    .btn {
+      font-family: monospace;
+      cursor: pointer;
+      color: #555;
+      padding: 0 3px;
+      line-height: inherit;
+      margin-right: 4px;
+      background: #f5f5f5;
+    }
+
+    .btn.active {
+      background: #333;
+      color: #fff;
+    }
+
+    .cell-btn {
+      float: right;
+      position: relative;
+      z-index: 1;
+    }
+
+    .handsontable td {
+      white-space: nowrap;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="app"></div>
+  <template id="slot-tmpl">
+    <div class="slot">
+      <div class="slot-title">
+        <span class="slot-path"></span>
+        <span class="slot-toolbar">
+          <span class="btn btn-table">TABLE</span>
+          <span class="btn btn-json">JSON</span>
+          <span class="btn btn-raw">RAW</span>
+          <span class="btn btn-collapse">[-]</span>
+        </span>
+      </div>
+      <div class="slot-body">
+        <div class="slot-hot"></div>
+        <textarea class="slot-textarea slot-textarea-json"></textarea>
+        <textarea class="slot-textarea slot-textarea-raw"></textarea>
+      </div>
+      <div class="slot-children"></div>
+    </div>
+  </template>
+  <script>
+    // ============================================================
+    // Global state
+    // ============================================================
+    const S = {
+      root: { $schema: {}, data: {} },
+      instances: []  // { hot, container, parentSlot }
+    };
+
+    // ============================================================
+    // Utility functions
+    // ============================================================
+
+    function getType(value) {
+      if (value === null || value === undefined) return 'null';
+      if (Array.isArray(value)) return 'array';
+      return typeof value;  // 'object' | 'string' | 'number' | 'boolean'
+    }
+
+    function isInteger(value) {
+      return typeof value === 'number' && Number.isFinite(value) && Math.floor(value) === value;
+    }
+
+    /** Custom formatter: object=one key per line, array=one element per line, values stay on one line */
+    function formatJSON(value) {
+      const t = getType(value);
+
+      if (t === 'object') {
+        const keys = Object.keys(value);
+        if (keys.length === 0) return '{}';
+        const lines = keys.map(k => JSON.stringify(k) + ': ' + JSON.stringify(value[k]));
+        return '{\n' + lines.join(',\n') + '\n}';
+      }
+
+      if (t === 'array') {
+        if (value.length === 0) return '[]';
+        const lines = value.map(item => JSON.stringify(item));
+        return '[\n' + lines.join(',\n') + '\n]';
+      }
+
+      return JSON.stringify(value);
+    }
+
+    // ============================================================
+    // Schema auto-derivation
+    // ============================================================
+
+    function deriveSchema(data) {
+      if (data === null || data === undefined) return {};
+      const t = getType(data);
+
+      if (t === 'array') {
+        const itemSchema = data.length > 0 ? deriveSchema(data[0]) : {};
+        return { type: 'array', items: itemSchema };
+      }
+      if (t === 'object') {
+        const props = {};
+        for (const k of Object.keys(data)) {
+          props[k] = deriveSchema(data[k]);
+        }
+        return { type: 'object', properties: props };
+      }
+      if (t === 'string') return { type: 'string' };
+      if (t === 'number') return { type: isInteger(data) ? 'integer' : 'number' };
+      if (t === 'boolean') return { type: 'boolean' };
+      return {};
+    }
+
+    function mergeSchema(existing, derived) {
+      if (!derived || typeof derived !== 'object') return;
+      // merge properties
+      if (derived.properties) {
+        if (!existing.properties) existing.properties = {};
+        for (const k of Object.keys(derived.properties)) {
+          if (!(k in existing.properties)) {
+            existing.properties[k] = derived.properties[k];
+          } else {
+            mergeSchema(existing.properties[k], derived.properties[k]);
+          }
+        }
+      }
+      // merge type
+      if (derived.type && !existing.type) {
+        existing.type = derived.type;
+      }
+      // merge items
+      if (derived.items) {
+        if (!existing.items) existing.items = {};
+        mergeSchema(existing.items, derived.items);
+      }
+    }
+
+    function autoDerive() {
+      const derived = deriveSchema(S.root.data);
+      mergeSchema(S.root.$schema, derived);
+      // Update root slot's child hot if in table view
+      if (S.rootSlot && S.rootSlot._childHot) {
+        S.rootSlot._childHot.setDataAtCell(0, 0, S.root.$schema, 'schema-refresh');
+      }
+    }
+
+    // ============================================================
+    // Type hints for column headers
+    // ============================================================
+
+    const TYPE_HINT_MAP = {
+      'string': '(str)',
+      'integer': '(int)',
+      'number': '(num)',
+      'boolean': '(bool)',
+      'object': '(obj)',
+      'array': '(arr)'
+    };
+
+    function getTypeHint(schemaVal) {
+      if (!schemaVal) return '';
+      if (schemaVal.enum) return '(enum)';
+      if (schemaVal.type && TYPE_HINT_MAP[schemaVal.type]) {
+        return TYPE_HINT_MAP[schemaVal.type];
+      }
+      return '';
+    }
+
+    function buildObjectHeaders(objData, schema) {
+      return Object.keys(objData).map(key => {
+        const hint = getTypeHint(schema?.properties?.[key]);
+        return hint ? key + ' ' + hint : key;
+      });
+    }
+
+    // ============================================================
+    // Instance lookups
+    // ============================================================
+
+    function findParentSlot(hot) {
+      const found = S.instances.find(inst => inst.hot === hot);
+      return found ? found.parentSlot : null;
+    }
+
+    // ============================================================
+    // Handsontable factory
+    // ============================================================
+
+    const DEFAULT_HOT_CONFIG = {
+      licenseKey: 'non-commercial-and-evaluation',
+      width: 'auto',
+      height: 'auto',
+      manualColumnResize: true,
+      manualRowResize: false,
+      autoColumnSize: { syncLimit: 50 },
+      outsideClickDeselects: false,
+      contextMenu: false,
+      copyPaste: true,
+      editor: 'text'
+    };
+
+    function createHotInstance(container, overrides) {
+      const config = Object.assign({}, DEFAULT_HOT_CONFIG, overrides);
+      const hot = new Handsontable(container, config);
+      S.instances.push({ hot, container, parentSlot: overrides.parentSlot || null });
+      return hot;
+    }
+
+    function destroyHotInstance(hot) {
+      S.instances = S.instances.filter(inst => inst.hot !== hot);
+      hot.destroy();
+    }
+
+    function capColumnWidths(hot, maxW) {
+      maxW = maxW || 320;
+      const widths = [];
+      let changed = false;
+      const cols = hot.countCols();
+      for (let i = 0; i < cols; i++) {
+        const w = hot.getColWidth(i);
+        widths.push(w > maxW ? maxW : w);
+        if (w > maxW) changed = true;
+      }
+      if (changed) hot.updateSettings({ colWidths: widths });
+    }
+
+    // ============================================================
+    // Cell renderer
+    // ============================================================
+
+    function cellRenderer(hot, td, row, col, prop, value, cellProperties) {
+      Handsontable.renderers.TextRenderer.apply(this, arguments);
+
+      const str = (value == null) ? '' : JSON.stringify(value);
+      const truncated = str.length > 80 ? str.slice(0, 80) + '\u2026' : str;
+      const isExpanded = cellProperties._expanded;
+
+      // Spare cells: no button, show empty
+      if (value == null) {
+        td.innerHTML = '';
+        return;
+      }
+
+      // Set cell content: button + text
+      td.innerHTML =
+        '<span class="btn cell-btn">' + (isExpanded ? '[-]' : '[+]') + '</span>' + truncated;
+      if (str.length > 80) td.title = str;
+
+      // Attach button event
+      const btn = td.querySelector('.cell-btn');
+      if (btn) {
+        btn.addEventListener('mousedown', function (e) {
+          e.stopPropagation();
+          e.preventDefault();
+          if (isExpanded) {
+            collapseCell(hot, row, col);
+          } else {
+            expandCell(hot, row, col, value, cellJsonPath(hot, row, col));
+          }
+        });
+      }
+    }
+
+    // ============================================================
+    // Slot factory (shared by root and expand)
+    // ============================================================
+
+    function createSlot(config) {
+      const tmpl = document.getElementById('slot-tmpl');
+      const slotEl = tmpl.content.cloneNode(true).querySelector('.slot');
+
+      // Classes
+      if (config.cls) slotEl.classList.add(config.cls);
+
+      // Title
+      if (config.jsonPath) {
+        slotEl._jsonPath = config.jsonPath;
+        slotEl.querySelector('.slot-path').textContent = config.jsonPath;
+      }
+
+      // Type
+      if (config.valueType) slotEl.dataset.valueType = config.valueType;
+
+      // Append
+      config.parent.appendChild(slotEl);
+
+      // Hide initially
+      slotEl.querySelector('.slot-hot').style.display = 'none';
+      slotEl.querySelector('.slot-textarea-json').style.display = 'none';
+      slotEl.querySelector('.slot-textarea-raw').style.display = 'none';
+
+      // Button visibility
+      slotEl.querySelector('.btn-table').style.display = config.showTable ? '' : 'none';
+      slotEl.querySelector('.btn-json').style.display = config.showJSON ? '' : 'none';
+      slotEl.querySelector('.btn-raw').style.display = config.showRaw ? '' : 'none';
+      slotEl.querySelector('.btn-collapse').style.display = config.showCollapse !== false ? '' : 'none';
+
+      // Button refs
+      const btnTable = slotEl.querySelector('.btn-table');
+      const btnJSON = slotEl.querySelector('.btn-json');
+      const btnRaw = slotEl.querySelector('.btn-raw');
+      const btnCollapse = slotEl.querySelector('.btn-collapse');
+      slotEl._btnTable = btnTable;
+      slotEl._btnJSON = btnJSON;
+      slotEl._btnRaw = btnRaw;
+
+      // Bind events
+      if (config.onTable) btnTable.addEventListener('mousedown', function (e) { e.preventDefault(); config.onTable(slotEl); });
+      if (config.onJSON) btnJSON.addEventListener('mousedown', function (e) { e.preventDefault(); config.onJSON(slotEl); });
+      if (config.onRaw) btnRaw.addEventListener('mousedown', function (e) { e.preventDefault(); config.onRaw(slotEl); });
+      if (config.onCollapse) btnCollapse.addEventListener('mousedown', function (e) { e.preventDefault(); config.onCollapse(); });
+
+      // Store data
+      slotEl._value = config.value;
+      slotEl._parentHot = config.parentHot || null;
+      slotEl._parentRow = config.parentRow != null ? config.parentRow : -1;
+      slotEl._parentCol = config.parentCol != null ? config.parentCol : -1;
+
+      // Activate default view
+      if (config.activate) config.activate(slotEl);
+
+      return slotEl;
+    }
+
+    // ============================================================
+    // Expand / Collapse
+    // ============================================================
+
+    function expandCell(hot, row, col, cellValue, jsonPath) {
+      const type = getType(cellValue);
+      const parentSlot = findParentSlot(hot);
+      const parent = parentSlot ? parentSlot.querySelector('.slot-children') : S.rootSlot.querySelector('.slot-children');
+
+      const slotEl = createSlot({
+        parent: parent,
+        jsonPath: jsonPath,
+        valueType: type,
+        value: cellValue,
+        parentHot: hot,
+        parentRow: row,
+        parentCol: col,
+        showTable: type === 'object' || type === 'array',
+        showJSON: true,
+        showRaw: type === 'string',
+        onTable: activateTableView,
+        onJSON: activateJSONView,
+        onRaw: activateRawView,
+        onCollapse: function () { collapseCell(hot, row, col); },
+        activate: function (slotEl) {
+          if (type === 'object' || type === 'array') {
+            activateTableView(slotEl);
+          } else if (type === 'string') {
+            activateRawView(slotEl, cellValue);
+          } else {
+            activateJSONView(slotEl, cellValue, type);
+          }
+        }
+      });
+
+      const meta = hot.getCellMeta(row, col);
+      meta._expanded = true;
+      meta._slotEl = slotEl;
+
+      // Re-render cell to show [-] button
+      hot.render();
+    }
+
+    function collapseCell(hot, row, col) {
+      const meta = hot.getCellMeta(row, col);
+      const slotEl = meta._slotEl;
+      if (!slotEl) return;
+
+      // Sync textarea data if active
+      if (slotEl._activeView === 'json' || slotEl._activeView === 'raw') {
+        syncTextareaToData(slotEl);
+      }
+
+      // Destroy child hot instance
+      if (slotEl._childHot) {
+        destroyHotInstance(slotEl._childHot);
+        slotEl._childHot = null;
+      }
+
+      // Remove slot DOM
+      slotEl.remove();
+
+      // Clear meta
+      meta._expanded = false;
+      meta._slotEl = null;
+
+      // Re-render cell
+      hot.render();
+
+      // Recalculate column widths
+      capColumnWidths(hot);
+
+      // Auto-derive schema after collapse
+      autoDerive();
+    }
+
+    // ============================================================
+    // Hot hooks helpers
+    // ============================================================
+
+    function setupInlineEditing(hot) {
+      hot.addHook('beforeBeginEditing', function (row, col) {
+        const value = this.getDataAtCell(row, col);
+        this.setDataAtCell(row, col, JSON.stringify(value), 'edit-prep');
+      });
+      hot.addHook('afterChange', function (changes, source) {
+        if (source === 'loadData' || source === 'edit-prep' || source === 'cascade' || source === 'schema-refresh' || source === 'parse-result' || source === 'delete') return;
+        changes.forEach(([row, col, oldVal, newVal]) => {
+          if (typeof newVal === 'string') {
+            try {
+              this.setDataAtCell(row, col, JSON.parse(newVal), 'parse-result');
+            } catch (e) { }
+          }
+        });
+        autoDerive();
+      });
+    }
+
+    function setupDeleteKey(hot) {
+      hot.addHook('beforeKeyDown', function (event) {
+        if (event.key === 'Delete' || event.key === 'Backspace') {
+          const sel = this.getSelected();
+          if (sel && !this.getActiveEditor()) {
+            this.setDataAtCell(sel[0][0], sel[0][1], null, 'delete');
+            event.stopImmediatePropagation();
+          }
+        }
+      });
+    }
+
+    // ============================================================
+    // View activation: TABLE
+    // ============================================================
+
+    function activateTableView(slotEl) {
+      if (slotEl._activeView === 'table') return;
+
+      // Sync before switching
+      if (slotEl._activeView === 'json' || slotEl._activeView === 'raw') {
+        syncTextareaToData(slotEl);
+      }
+
+      const value = slotEl._value;
+      const type = slotEl.dataset.valueType;
+      const parentHot = slotEl._parentHot;
+      const parentRow = slotEl._parentRow;
+      const parentCol = slotEl._parentCol;
+      const isRoot = slotEl.classList.contains('slot-root');
+
+      // Destroy old child hot
+      if (slotEl._childHot) {
+        destroyHotInstance(slotEl._childHot);
+        slotEl._childHot = null;
+      }
+
+      // Show hot, hide textarea
+      slotEl.querySelector('.slot-hot').style.display = 'block';
+      slotEl.querySelector('.slot-textarea-json').style.display = 'none';
+      slotEl.querySelector('.slot-textarea-raw').style.display = 'none';
+
+      let hot;
+      if (isRoot) {
+        hot = createHotInstance(slotEl.querySelector('.slot-hot'), {
+          data: [[value.$schema, value.data]],
+          colHeaders: ['$schema', 'data'],
+          rowHeaders: false,
+          columns: [
+            { renderer: cellRenderer },
+            { renderer: cellRenderer }
+          ],
+          minSpareCols: 0,
+          parentSlot: slotEl
+        });
+        setupCopyPaste(hot);
+        setupInlineEditing(hot);
+        setupDeleteKey(hot);
+
+        // Sync root table back to S.root
+        hot.addHook('afterChange', function (changes, source) {
+          if (source === 'loadData' || source === 'edit-prep' || source === 'parse-result' || source === 'schema-refresh') return;
+          const row = this.getDataAtRow(0);
+          S.root.$schema = row[0];
+          S.root.data = row[1];
+          autoDerive();
+        });
+      } else {
+        const config = (type === 'object') ? {
+          data: [Object.keys(value).map(k => value[k])],
+          colHeaders: buildObjectHeaders(value, S.root.$schema?.properties || {}),
+          rowHeaders: false,
+          columns: Object.keys(value).map(() => ({ renderer: cellRenderer })),
+          minSpareCols: 0
+        } : {
+          data: value.map(item => [item]),
+          colHeaders: false,
+          rowHeaders: true,
+          columns: [{ renderer: cellRenderer }],
+          manualRowMove: true,
+          minSpareRows: 3
+        };
+        config.parentSlot = slotEl;
+        hot = createHotInstance(slotEl.querySelector('.slot-hot'), config);
+      }
+
+      slotEl._childHot = hot;
+      setupInlineEditing(hot);
+      hot.addHook('afterRender', function () { capColumnWidths(this); });
+
+      // Cascade for sub-tables
+      if (!isRoot) {
+        hot.addHook('afterChange', function (changes, source) {
+          if (source === 'loadData') return;
+          slotEl._value = extractDataFromHot(hot, type);
+          parentHot.setDataAtCell(parentRow, parentCol, slotEl._value, 'cascade');
+          autoDerive();
+        });
+        if (type === 'array') {
+          hot.addHook('afterRowMove', function () {
+            slotEl._value = extractDataFromHot(hot, 'array');
+            parentHot.setDataAtCell(parentRow, parentCol, slotEl._value, 'cascade');
+            autoDerive();
+          });
+          hot.addHook('afterChange', function (changes, source) {
+            if (source === 'loadData') return;
+            cleanupEmptyRows(this);
+          });
+        }
+      }
+
+      slotEl._activeView = 'table';
+      highlightActiveButton(slotEl);
+    }
+
+    // ============================================================
+    // View activation: JSON
+    // ============================================================
+
+    function activateJSONView(slotEl, initialValue, type) {
+      if (slotEl._activeView === 'json' && !initialValue) return;
+
+      let value = slotEl._value;
+      type = type || slotEl.dataset.valueType;
+
+      // Sync from table if switching
+      if (slotEl._activeView === 'table' && slotEl._childHot) {
+        value = extractDataFromHot(slotEl._childHot, type);
+        destroyHotInstance(slotEl._childHot);
+        slotEl._childHot = null;
+      }
+      // Sync from raw if switching
+      if (slotEl._activeView === 'raw') {
+        syncTextareaToData(slotEl);
+        value = slotEl._value;
+      }
+
+      if (initialValue !== undefined) {
+        value = initialValue;
+      }
+
+      slotEl._value = value;
+      slotEl.querySelector('.slot-hot').style.display = 'none';
+      slotEl.querySelector('.slot-textarea-raw').style.display = 'none';
+
+      const textarea = slotEl.querySelector('.slot-textarea-json');
+      textarea.style.display = 'block';
+
+      if (type === 'object' || type === 'array') {
+        textarea.value = formatJSON(value);
+      } else {
+        textarea.value = JSON.stringify(value);
+      }
+
+      slotEl._activeView = 'json';
+      highlightActiveButton(slotEl);
+    }
+
+    // ============================================================
+    // View activation: RAW (string only)
+    // ============================================================
+
+    function activateRawView(slotEl, initialValue) {
+      if (slotEl._activeView === 'raw' && initialValue === undefined) return;
+
+      const textarea = slotEl.querySelector('.slot-textarea-raw');
+
+      // Determine value
+      if (initialValue !== undefined) {
+        slotEl._value = initialValue;
+      } else if (slotEl._activeView === 'json') {
+        const jsonTA = slotEl.querySelector('.slot-textarea-json');
+        try {
+          slotEl._value = JSON.parse(jsonTA.value);
+        } catch (e) {
+          slotEl._value = jsonTA.value;
+        }
+      } else if (slotEl._activeView === 'table' && slotEl._childHot) {
+        slotEl._value = extractDataFromHot(slotEl._childHot, 'string');
+        destroyHotInstance(slotEl._childHot);
+        slotEl._childHot = null;
+      }
+
+      slotEl.querySelector('.slot-hot').style.display = 'none';
+      slotEl.querySelector('.slot-textarea-json').style.display = 'none';
+      textarea.style.display = 'block';
+      textarea.value = slotEl._value;
+
+      slotEl._activeView = 'raw';
+      highlightActiveButton(slotEl);
+    }
+
+    // ============================================================
+    // Button highlight
+    // ============================================================
+
+    function highlightActiveButton(slotEl) {
+      const v = slotEl._activeView;
+      slotEl._btnTable.classList.toggle('active', v === 'table');
+      slotEl._btnJSON.classList.toggle('active', v === 'json');
+      slotEl._btnRaw.classList.toggle('active', v === 'raw');
+    }
+
+    // ============================================================
+    // Data sync from textarea
+    // ============================================================
+
+    function syncTextareaToData(slotEl) {
+      const textarea = slotEl._activeView === 'raw'
+        ? slotEl.querySelector('.slot-textarea-raw')
+        : slotEl.querySelector('.slot-textarea-json');
+      const raw = textarea.value;
+
+      if (slotEl._activeView === 'raw') {
+        slotEl._value = raw;
+      } else {
+        try {
+          slotEl._value = JSON.parse(raw);
+        } catch (e) {
+          slotEl._value = raw;
+        }
+      }
+
+      const parentHot = slotEl._parentHot;
+      if (parentHot) {
+        parentHot.setDataAtCell(slotEl._parentRow, slotEl._parentCol, slotEl._value, 'cascade');
+      }
+      autoDerive();
+    }
+
+    // ============================================================
+    // Extract data from Hot instance
+    // ============================================================
+
+    function extractDataFromHot(hot, type) {
+      if (type === 'object') {
+        const headers = hot.getColHeader();
+        const row = hot.getDataAtRow(0);
+        const obj = {};
+        for (let i = 0; i < headers.length; i++) {
+          const key = headers[i].replace(/\s+\(.*\)$/, '');  // strip type hint
+          if (key) {
+            obj[key] = row[i];
+          }
+        }
+        return obj;
+      }
+      if (type === 'array') {
+        const data = hot.getData();
+        // filter empty rows
+        return data
+          .filter(row => row.some(cell => cell !== null && cell !== undefined && cell !== ''))
+          .map(row => row[0]);
+      }
+      // primitive types: just get the single cell
+      return hot.getDataAtCell(0, 0);
+    }
+
+    // ============================================================
+    // Cleanup empty rows in array table
+    // ============================================================
+
+    function cleanupEmptyRows(hot) {
+      if (hot._cleaning) return;
+      hot._cleaning = true;
+      const data = hot.getData();
+      const totalRows = hot.countRows();
+      let lastDataRow = -1;
+      for (let i = 0; i < totalRows; i++) {
+        const row = data[i];
+        const isEmpty = row.every(cell => cell === null || cell === undefined || cell === '');
+        if (!isEmpty) lastDataRow = i;
+      }
+      const removeFrom = lastDataRow + 2;
+      while (hot.countRows() > removeFrom) {
+        hot.alter('remove_row', hot.countRows() - 1);
+      }
+      hot._cleaning = false;
+    }
+
+    // ============================================================
+    // Copy / Paste
+    // ============================================================
+
+    function setupCopyPaste(hot) {
+      hot.addHook('beforeCopy', function (data) {
+        // All cell values are JSON values; stringify for clipboard
+        return data.map(row =>
+          row.map(cell => {
+            if (cell === null || cell === undefined) return 'null';
+            return JSON.stringify(cell);
+          })
+        );
+      });
+
+      hot.addHook('beforePaste', function (data) {
+        return data.map(row =>
+          row.map(cell => {
+            if (typeof cell === 'string') {
+              try {
+                return JSON.parse(cell);
+              } catch (e) {
+                return cell;  // keep as string
+              }
+            }
+            return cell;
+          })
+        );
+      });
+    }
+
+    // ============================================================
+    // JSON path helper
+    // ============================================================
+
+    function cellJsonPath(hot, row, col) {
+      const parentSlot = findParentSlot(hot);
+      const parentPath = parentSlot ? (parentSlot._jsonPath || '') : 'root';
+      const headers = hot.getColHeader();
+      if (headers && headers[col]) {
+        const key = headers[col].replace(/\s+\(.*\)$/, '');
+        return parentPath + '.' + key;
+      }
+      return parentPath + '[' + row + ']';
+    }
+
+    // ============================================================
+    // Root slot initialization
+    // ============================================================
+
+    function initRootSlot() {
+      S.root.$schema = {};
+      S.root.data = {};
+
+      const slotEl = createSlot({
+        parent: document.getElementById('app'),
+        cls: 'slot-root',
+        jsonPath: 'root',
+        valueType: 'object',
+        value: { $schema: S.root.$schema, data: S.root.data },
+        showTable: true,
+        showJSON: true,
+        showRaw: false,
+        showCollapse: false,
+        onTable: activateTableView,
+        onJSON: activateJSONView,
+        activate: activateTableView
+      });
+
+      S.rootSlot = slotEl;
+      slotEl._parentHot = null;
+      slotEl._parentRow = -1;
+      slotEl._parentCol = -1;
+    }
+
+    // ============================================================
+    // Boot
+    // ============================================================
+
+    document.addEventListener('DOMContentLoaded', function () {
+      initRootSlot();
+    });
+  </script>
+</body>
+
+</html>
