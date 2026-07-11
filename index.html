@@ -211,14 +211,13 @@ function bindAutoCollapse(hot) {
 
 function buildHot(el) {
   var raw = el._raw, type = el._type, div = el._hotDiv;
-  var isRoot = el.classList.contains('slot-root');
   var hot;
 
   if (type === 'object') {
     var keys = Object.keys(raw);
     hot = makeHot(div, {
       data: [keys.map(function (k) { return JSON.stringify(raw[k]); })],
-      colHeaders: isRoot ? ['$schema', 'data'] : keys,
+      colHeaders: keys,
       columns: keys.map(function () { return { renderer: cellRenderer }; })
     });
   } else if (type === 'array') {
@@ -267,7 +266,7 @@ function buildHot(el) {
   hot.addHook('afterChange', function (changes, source) {
     if (source === 'loadData') return;
     el._raw = readHot(el._hot, el._type, el._isMultiCol);
-    if (isRoot) {
+    if (el.classList.contains('slot-root')) {
       S.root.$schema = el._raw.$schema;
       S.root.data = el._raw.data;
     } else {
