@@ -1,6 +1,5 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -8,395 +7,398 @@
   <script src="https://cdn.jsdelivr.net/npm/handsontable@14.6.0/dist/handsontable.full.min.js"></script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/handsontable@14.6.0/dist/handsontable.full.min.css">
   <style>
-    body {
-      overflow-x: auto;
-      padding: 8px;
-      font-family: monospace;
-      font-size: 13px;
-    }
-
-    .slot {
-      margin: 4px 0 4px 16px;
-      border-left: 2px solid #ddd;
-      padding-left: 12px;
-    }
-
-    .slot-root {
-      margin: 0;
-      border-left: 0;
-      padding-left: 0;
-    }
-
-    .slot-bar {
-      margin-bottom: 4px;
-    }
-
-    .slot-path {
-      font-weight: bold;
-      margin-right: 8px;
-    }
-
-    .btn {
-      cursor: pointer;
-      padding: 0 4px;
-      background: #f0f0f0;
-      font-family: monospace;
-      user-select: none;
-    }
-
-    .btn.active {
-      background: #333;
-      color: #fff;
-    }
-
-    .cell-btn {
-      float: right;
-      position: relative;
-      z-index: 1;
-    }
-
-    .slot-textarea {
-      width: 480px;
-      height: 160px;
-      font: 13px monospace;
-      resize: both;
-      padding: 4px;
-      box-sizing: border-box;
-    }
-
-    .handsontable td {
-      white-space: nowrap;
-    }
+    body { overflow-x: auto; padding: 8px; font-family: monospace; font-size: 13px; }
+    .slot { margin: 4px 0 4px 16px; border-left: 2px solid #ddd; padding-left: 12px; }
+    .slot-root { margin: 0; border-left: 0; padding-left: 0; }
+    .slot-bar { margin-bottom: 4px; }
+    .slot-path { font-weight: bold; margin-right: 8px; }
+    .btn { cursor: pointer; padding: 0 4px; background: #f0f0f0; font-family: monospace; user-select: none; }
+    .btn.active { background: #333; color: #fff; }
+    .cell-btn { float: right; position: relative; z-index: 1; }
+    .slot-textarea { width: 480px; height: 160px; font: 13px monospace; resize: both; padding: 4px; box-sizing: border-box; }
+    .handsontable td { white-space: nowrap; }
   </style>
 </head>
-
 <body>
-  <div id="app"></div>
-  <template id="slot-tmpl">
-    <div class="slot">
-      <div class="slot-bar">
-        <span class="slot-path"></span>
-        <span class="btn btn-table">TABLE</span>
-        <span class="btn btn-json">JSON</span>
-        <span class="btn btn-collapse">[-]</span>
-      </div>
-      <div class="slot-hot"></div>
-      <textarea class="slot-textarea"></textarea>
-      <div class="slot-children"></div>
+<div id="app"></div>
+<template id="slot-tmpl">
+  <div class="slot">
+    <div class="slot-bar">
+      <span class="slot-path"></span>
+      <span class="btn btn-table">TABLE</span>
+      <span class="btn btn-text">TEXT</span>
+      <span class="btn btn-raw">RAW</span>
+      <span class="btn btn-collapse">[-]</span>
     </div>
-  </template>
-  <script>
-    var T = function (s) { try { return JSON.parse(s); } catch (e) { return s; } };
-    function typeOf(v) { return v === null ? 'null' : Array.isArray(v) ? 'array' : typeof v; }
-    function isObjOrArr(v) { var t = typeOf(v); return t === 'object' || t === 'array'; }
+    <div class="slot-hot"></div>
+    <textarea class="slot-textarea"></textarea>
+    <div class="slot-children"></div>
+  </div>
+</template>
+<script>
+// ============================================================
+// Helpers
+// ============================================================
+function tryParse(s) {
+  try { return JSON.parse(s); } catch (e) { return s; }
+}
 
-    function fmtJSON(v) {
-      var t = typeOf(v);
-      if (t === 'object') {
-        var keys = Object.keys(v);
-        return keys.length === 0 ? '{}' : `{\n${keys.map(function (k) { return `${JSON.stringify(k)}: ${JSON.stringify(v[k])}`; }).join(',\n')}\n}`;
-      }
-      if (t === 'array') {
-        return v.length === 0 ? '[]' : `[\n${v.map(function (it) { return JSON.stringify(it); }).join(',\n')}\n]`;
-      }
-      return JSON.stringify(v);
-    }
+function typeOf(v) {
+  if (v === null) return 'null';
+  if (Array.isArray(v)) return 'array';
+  return typeof v;
+}
 
-    // ============================================================
-    // Cell renderer — value is JSON text string
-    // ============================================================
-    function cellRenderer(hot, td, row, col, prop, value, cellProperties) {
-      Handsontable.renderers.TextRenderer.apply(this, arguments);
-      if (value == null || value === '') { td.innerHTML = ''; return; }
-      var display = value.length > 80 ? `${value.slice(0, 80)}\u2026` : value;
-      var expanded = !!cellProperties._expanded;
-      td.innerHTML = `<span class="btn cell-btn${expanded ? ' active' : ''}">${expanded ? '[-]' : '[+]'}</span>${display}`;
-      if (value.length > 80) td.title = value;
-      td.querySelector('.cell-btn').addEventListener('mousedown', function (e) {
-        e.stopPropagation(); e.preventDefault();
-        expanded ? collapse(hot, row, col) : expand(hot, row, col);
-      });
-    }
+function isContainer(v) {
+  var t = typeOf(v);
+  return t === 'object' || t === 'array';
+}
 
-    // ============================================================
-    // Hot factory
-    // ============================================================
-    function makeHot(div, cfg) {
-      return new Handsontable(div, Object.assign({
-        licenseKey: 'non-commercial-and-evaluation',
-        width: 'auto', height: 'auto',
-        manualColumnResize: true,
-        outsideClickDeselects: false, contextMenu: false,
-        editor: 'text'
-      }, cfg));
-    }
+function formatJSON(v) {
+  var t = typeOf(v);
+  if (t === 'object') {
+    var keys = Object.keys(v);
+    return keys.length === 0 ? '{}'
+      : `{\n${keys.map(function (k) { return `${JSON.stringify(k)}: ${JSON.stringify(v[k])}`; }).join(',\n')}\n}`;
+  }
+  if (t === 'array') {
+    return v.length === 0 ? '[]'
+      : `[\n${v.map(function (it) { return JSON.stringify(it); }).join(',\n')}\n]`;
+  }
+  return JSON.stringify(v);
+}
 
-    // ============================================================
-    // Slot
-    // ============================================================
-    function slot(parent, opts) {
-      var t = document.getElementById('slot-tmpl');
-      var d = t.content.cloneNode(true).querySelector('.slot');
-      if (opts.isRoot) d.classList.add('slot-root');
+// ============================================================
+// Cell renderer — value is JSON text, display directly
+// ============================================================
+function cellRenderer(hot, td, row, col, prop, value, cellProperties) {
+  Handsontable.renderers.TextRenderer.apply(this, arguments);
+  if (value == null || value === '') { td.innerHTML = ''; return; }
+  var display = value.length > 80 ? `${value.slice(0, 80)}\u2026` : value;
+  var expanded = !!cellProperties._expanded;
+  td.innerHTML = `<span class="btn cell-btn${expanded ? ' active' : ''}">${expanded ? '[-]' : '[+]'}</span>${display}`;
+  if (value.length > 80) td.title = value;
+  td.querySelector('.cell-btn').addEventListener('mousedown', function (e) {
+    e.stopPropagation(); e.preventDefault();
+    if (expanded) collapseCell(hot, row, col);
+    else expandCell(hot, row, col);
+  });
+}
 
-      d.querySelector('.slot-path').textContent = opts.path || '';
-      d._raw = opts.raw;        // parsed value
-      d._type = opts.type;
-      d._pRow = opts.pRow; d._pCol = opts.pCol; d._pHot = opts.pHot;
-      d._multi = false;
+// ============================================================
+// Handsontable factory
+// ============================================================
+function makeHot(div, cfg) {
+  return new Handsontable(div, Object.assign({
+    licenseKey: 'non-commercial-and-evaluation',
+    width: 'auto', height: 'auto',
+    manualColumnResize: true,
+    outsideClickDeselects: false, contextMenu: false,
+    editor: 'text'
+  }, cfg));
+}
 
-      var bar = d.querySelector('.slot-bar');
-      d._btnT = bar.querySelector('.btn-table');
-      d._btnJ = bar.querySelector('.btn-json');
-      d._btnX = bar.querySelector('.btn-collapse');
+// ============================================================
+// Slot factory
+// ============================================================
+function createSlot(parentEl, opts) {
+  var tpl = document.getElementById('slot-tmpl');
+  var el = tpl.content.cloneNode(true).querySelector('.slot');
+  if (opts.isRoot) el.classList.add('slot-root');
 
-      d._btnT.style.display = opts.showTable ? '' : 'none';
-      d._btnJ.style.display = '';  // always show JSON
-      d._btnX.style.display = opts.noClose ? 'none' : '';
+  el.querySelector('.slot-path').textContent = opts.path || '';
+  el._raw  = opts.raw;
+  el._type = opts.type;
+  el._parentRow = opts.parentRow;
+  el._parentCol = opts.parentCol;
+  el._parentHot = opts.parentHot;
+  el._multi = false;
 
-      d._btnT.addEventListener('mousedown', function (e) { e.preventDefault(); view(d, 'table'); });
-      d._btnJ.addEventListener('mousedown', function (e) { e.preventDefault(); view(d, 'json'); });
-      d._btnX.addEventListener('mousedown', function (e) { e.preventDefault(); saveSlot(d); destroySlot(d); });
+  var bar = el.querySelector('.slot-bar');
+  el._btnTable   = bar.querySelector('.btn-table');
+  el._btnRaw     = bar.querySelector('.btn-raw');
+  el._btnText    = bar.querySelector('.btn-text');
+  el._btnClose   = bar.querySelector('.btn-collapse');
 
-      d._hot = null; d._view = '';
-      d._hotDiv = d.querySelector('.slot-hot');
-      d._ta = d.querySelector('.slot-textarea');
-      d._kids = d.querySelector('.slot-children');
+  var isStr = opts.type === 'string';
+  el._btnTable.style.display = opts.showTable ? '' : 'none';
+  el._btnRaw.style.display  = '';
+  el._btnText.style.display  = isStr ? '' : 'none';
+  el._btnClose.style.display = opts.noClose ? 'none' : '';
 
-      (parent || document.getElementById('app')).appendChild(d);
-      return d;
-    }
+  el._btnTable.addEventListener('mousedown', function (e) { e.preventDefault(); switchView(el, 'table'); });
+  el._btnRaw.addEventListener('mousedown',  function (e) { e.preventDefault(); switchView(el, 'raw'); });
+  el._btnText.addEventListener('mousedown',  function (e) { e.preventDefault(); switchView(el, 'text'); });
+  el._btnClose.addEventListener('mousedown', function (e) { e.preventDefault(); saveSlot(el); destroySlot(el); });
 
-    // ============================================================
-    // View switch
-    // ============================================================
-    function view(d, v) {
-      if (d._view === v) return;
-      saveSlot(d);
+  el._hot = null;
+  el._view = '';
+  el._hotDiv = el.querySelector('.slot-hot');
+  el._textarea = el.querySelector('.slot-textarea');
+  el._children = el.querySelector('.slot-children');
 
-      d._hotDiv.style.display = 'none';
-      d._ta.style.display = 'none';
-      if (d._hot) { d._hot.destroy(); d._hot = null; }
+  (parentEl || document.getElementById('app')).appendChild(el);
+  return el;
+}
 
-      if (v === 'table') {
-        d._hotDiv.style.display = 'block';
-        d._hot = buildHot(d);
-      }
-      if (v === 'json') {
-        d._ta.style.display = 'block';
-        d._ta.value = isObjOrArr(d._raw) ? fmtJSON(d._raw) : JSON.stringify(d._raw);
-      }
+// ============================================================
+// View switching
+// ============================================================
+function switchView(el, view) {
+  if (el._view === view) return;
+  saveSlot(el);
 
-      d._view = v;
-      d._btnT.classList.toggle('active', v === 'table');
-      d._btnJ.classList.toggle('active', v === 'json');
-    }
+  el._hotDiv.style.display = 'none';
+  el._textarea.style.display = 'none';
+  if (el._hot) { el._hot.destroy(); el._hot = null; }
 
-    // ============================================================
-    // Build Handsontable — cells store JSON text
-    // ============================================================
-    function buildHot(d) {
-      var raw = d._raw, type = d._type, div = d._hotDiv;
-      var h;
+  if (view === 'table') {
+    el._hotDiv.style.display = 'block';
+    el._hot = buildHot(el);
+  }
+  if (view === 'raw') {
+    el._textarea.style.display = 'block';
+    el._textarea.value = isContainer(el._raw) ? formatJSON(el._raw) : JSON.stringify(el._raw);
+  }
+  if (view === 'text') {
+    el._textarea.style.display = 'block';
+    el._textarea.value = String(el._raw);
+  }
 
-      if (d.classList.contains('slot-root')) {
-        h = makeHot(div, {
-          data: [[raw.$schema, raw.data]],
-          colHeaders: ['$schema', 'data'],
-          columns: [{ renderer: cellRenderer }, { renderer: cellRenderer }]
-        });
-        h.addHook('beforeCopy', function (data) { return data; });
-        h.addHook('beforePaste', function (data) { return data; });
-        h.addHook('afterChange', function (changes, source) {
+  el._view = view;
+  el._btnTable.classList.toggle('active', view === 'table');
+  el._btnRaw.classList.toggle('active', view === 'raw');
+  el._btnText.classList.toggle('active', view === 'text');
+}
+
+// ============================================================
+// Build hot — cells store JSON text
+// ============================================================
+function buildHot(el) {
+  var raw = el._raw, type = el._type, div = el._hotDiv;
+  var isRoot = el.classList.contains('slot-root');
+  var hot;
+
+  if (isRoot) {
+    hot = makeHot(div, {
+      data: [[raw.$schema, raw.data]],
+      colHeaders: ['$schema', 'data'],
+      columns: [{ renderer: cellRenderer }, { renderer: cellRenderer }]
+    });
+    hot.addHook('beforeCopy', function (data) { return data; });
+    hot.addHook('beforePaste', function (data) { return data; });
+    hot.addHook('afterChange', function (changes, source) {
       if (source === 'loadData') return;
       var r = this.getDataAtRow(0);
       S.root.$schema = r[0]; S.root.data = r[1];
-        });
-        return h;
-      }
+    });
+    return hot;
+  }
 
-      if (type === 'object') {
-        var keys = Object.keys(raw);
-        h = makeHot(div, {
-          data: [keys.map(function (k) { return JSON.stringify(raw[k]); })],
-          colHeaders: keys,
-          columns: keys.map(function () { return { renderer: cellRenderer }; })
+  if (type === 'object') {
+    var keys = Object.keys(raw);
+    hot = makeHot(div, {
+      data: [keys.map(function (k) { return JSON.stringify(raw[k]); })],
+      colHeaders: keys,
+      columns: keys.map(function () { return { renderer: cellRenderer }; })
+    });
+  } else if (type === 'array') {
+    var isObjArray = raw.length > 0 && raw.every(function (it) {
+      return it != null && typeof it === 'object' && !Array.isArray(it);
+    });
+    if (isObjArray) {
+      el._multi = true;
+      var allKeys = [];
+      raw.forEach(function (it) {
+        if (it) Object.keys(it).forEach(function (k) {
+          if (allKeys.indexOf(k) === -1) allKeys.push(k);
         });
-      } else if (type === 'array') {
-        var objArr = raw.length > 0 && raw.every(function (it) { return it != null && typeof it === 'object' && !Array.isArray(it); });
-        if (objArr) {
-          d._multi = true;
-          var allKeys = [];
-          raw.forEach(function (it) {
-            if (it) Object.keys(it).forEach(function (k) { if (allKeys.indexOf(k) === -1) allKeys.push(k); });
-          });
-          h = makeHot(div, {
-            data: raw.map(function (it) {
-              return allKeys.map(function (k) { return JSON.stringify(it && k in it ? it[k] : null); });
-            }),
-            colHeaders: allKeys, rowHeaders: true,
-            columns: allKeys.map(function () { return { renderer: cellRenderer }; }),
-            manualRowMove: true, minSpareRows: 3
-          });
-        } else {
-          d._multi = false;
-          var arrData = raw.length > 0
-            ? raw.map(function (it) { return [JSON.stringify(it)]; })
-            : [['']];  // at least one empty row for user to start
-          h = makeHot(div, {
-            data: arrData,
-            colHeaders: [], rowHeaders: true,
-            columns: [{ renderer: cellRenderer }],
-            manualRowMove: true, minSpareRows: 3
-          });
-        }
-      } else {
-        h = makeHot(div, {
-          data: [[JSON.stringify(raw)]],
-          columns: [{ renderer: cellRenderer }]
-        });
-      }
-
-      h.addHook('beforeCopy', function (data) { return data; });
-      h.addHook('beforePaste', function (data) { return data; });
-      h.addHook('afterChange', function (changes, source) {
-        if (source === 'loadData') return;
-        d._raw = readHot(d._hot, d._type, d._multi);
-        up(d, d._raw);
       });
-
-      if (type === 'array') {
-        h.addHook('afterRowMove', function () {
-          d._raw = readHot(d._hot, 'array', d._multi);
-          up(d, d._raw);
-        });
-      }
-
-      return h;
-    }
-
-    // ============================================================
-    // Read hot → raw value (parse cell JSON text)
-    // ============================================================
-    function readHot(h, type, multi) {
-      var data = h.getData();
-      if (type === 'object') {
-        var headers = h.getColHeader();
-        var row = data[0] || [];
-        var obj = {};
-        for (var i = 0; i < headers.length; i++) {
-          var key = headers[i].replace(/\s+\(.*\)$/, '');
-          if (key) obj[key] = T(row[i]);
-        }
-        return obj;
-      }
-      if (type === 'array') {
-        var rows = data.filter(function (r) { return r.some(function (c) { return c != null && c !== ''; }); });
-        if (multi) {
-          var hdrs = h.getColHeader();
-          var keys = hdrs.map(function (s) { return s.replace(/\s+\(.*\)$/, ''); });
-          return rows.map(function (r) {
-            var o = {};
-            for (var j = 0; j < keys.length; j++) { if (r[j] != null) o[keys[j]] = T(r[j]); }
-            return o;
+      hot = makeHot(div, {
+        data: raw.map(function (it) {
+          return allKeys.map(function (k) {
+            return JSON.stringify(it && k in it ? it[k] : null);
           });
-        }
-        return rows.map(function (r) { return T(r[0]); });
-      }
-      return T(data[0] && data[0][0]);
-    }
-
-    // ============================================================
-    // Cascade up
-    // ============================================================
-    function up(d, raw) {
-      if (d._pHot && d._pRow >= 0 && d._pCol >= 0) {
-        d._pHot.setDataAtCell(d._pRow, d._pCol, JSON.stringify(raw), 'cascade');
-      }
-    }
-
-    // ============================================================
-    // Save / Destroy
-    // ============================================================
-    function saveSlot(d) {
-      if (d._view === 'json') d._raw = T(d._ta.value);
-      if (d._view === 'table' && d._hot) d._raw = readHot(d._hot, d._type, d._multi);
-    }
-
-    function destroySlot(d) {
-      if (d._hot) { d._hot.destroy(); d._hot = null; }
-      if (d._pHot && d._pRow >= 0 && d._pCol >= 0) {
-        d._pHot.setDataAtCell(d._pRow, d._pCol, JSON.stringify(d._raw), 'cascade');
-        var m = d._pHot.getCellMeta(d._pRow, d._pCol);
-        m._expanded = false; m._slot = null;
-        d._pHot.render();
-      }
-      d.remove();
-    }
-
-    // ============================================================
-    // Expand / Collapse
-    // ============================================================
-    function expand(h, row, col) {
-      var m = h.getCellMeta(row, col);
-      var text = h.getDataAtCell(row, col);
-      var raw = T(text);
-      var t = typeOf(raw);
-      var ps = findSlot(h);
-      var pel = ps ? ps._kids : document.getElementById('app');
-      var path = cellPath(h, row, col);
-
-      var child = slot(pel, {
-        path: path, raw: raw, type: t,
-        pHot: h, pRow: row, pCol: col,
-        showTable: isObjOrArr(raw), noClose: false
+        }),
+        colHeaders: allKeys, rowHeaders: true,
+        columns: allKeys.map(function () { return { renderer: cellRenderer }; }),
+        manualRowMove: true, minSpareRows: 3
       });
-
-      m._expanded = true; m._slot = child;
-      h.render();
-
-      view(child, isObjOrArr(raw) ? 'table' : 'json');
+    } else {
+      el._multi = false;
+      var arrData = raw.length > 0
+        ? raw.map(function (it) { return [JSON.stringify(it)]; })
+        : [['']];
+      hot = makeHot(div, {
+        data: arrData,
+        colHeaders: [], rowHeaders: true,
+        columns: [{ renderer: cellRenderer }],
+        manualRowMove: true, minSpareRows: 3
+      });
     }
+  } else {
+    hot = makeHot(div, {
+      data: [[JSON.stringify(raw)]],
+      columns: [{ renderer: cellRenderer }]
+    });
+  }
 
-    function collapse(h, row, col) {
-      var m = h.getCellMeta(row, col);
-      if (!m._slot) return;
-      saveSlot(m._slot);
-      destroySlot(m._slot);
+  hot.addHook('beforeCopy', function (data) { return data; });
+  hot.addHook('beforePaste', function (data) { return data; });
+  hot.addHook('afterChange', function (changes, source) {
+    if (source === 'loadData') return;
+    el._raw = readHot(el._hot, el._type, el._multi);
+    cascadeUp(el, el._raw);
+  });
+
+  if (type === 'array') {
+    hot.addHook('afterRowMove', function () {
+      el._raw = readHot(el._hot, 'array', el._multi);
+      cascadeUp(el, el._raw);
+    });
+  }
+
+  return hot;
+}
+
+// ============================================================
+// Read hot cells → raw value (parse JSON text in each cell)
+// ============================================================
+function readHot(hot, type, multi) {
+  var data = hot.getData();
+
+  if (type === 'object') {
+    var headers = hot.getColHeader();
+    var row = data[0] || [];
+    var obj = {};
+    for (var i = 0; i < headers.length; i++) {
+      var key = headers[i].replace(/\s+\(.*\)$/, '');
+      if (key) obj[key] = tryParse(row[i]);
     }
+    return obj;
+  }
 
-    function findSlot(h) {
-      for (var e = h.rootElement.parentNode; e && e !== document.body; e = e.parentNode) {
-        if (e.classList && e.classList.contains('slot')) return e;
-      }
-      return null;
+  if (type === 'array') {
+    var rows = data.filter(function (r) {
+      return r.some(function (c) { return c != null && c !== ''; });
+    });
+    if (multi) {
+      var hdrs = hot.getColHeader();
+      var keys = hdrs.map(function (s) { return s.replace(/\s+\(.*\)$/, ''); });
+      return rows.map(function (r) {
+        var o = {};
+        for (var j = 0; j < keys.length; j++) {
+          if (r[j] != null) o[keys[j]] = tryParse(r[j]);
+        }
+        return o;
+      });
     }
+    return rows.map(function (r) { return tryParse(r[0]); });
+  }
 
-    function cellPath(h, row, col) {
-      var s = findSlot(h);
-      var base = s ? (s.querySelector('.slot-path').textContent || 'root') : 'root';
-      var headers = h.getColHeader();
-      var multi = s && s._multi;
-      if (headers && col < headers.length) {
-        var key = headers[col].replace(/\s+\(.*\)$/, '');
-        return multi ? `${base}[${row}].${key}` : `${base}.${key}`;
-      }
-      return `${base}[${row}]`;
-    }
+  return tryParse(data[0] && data[0][0]);
+}
 
-    // ============================================================
-    // Init
-    // ============================================================
+// ============================================================
+// Cascade — push raw value up to parent cell as JSON text
+// ============================================================
+function cascadeUp(el, raw) {
+  if (el._parentHot && el._parentRow >= 0 && el._parentCol >= 0) {
+    el._parentHot.setDataAtCell(el._parentRow, el._parentCol, JSON.stringify(raw), 'cascade');
+  }
+}
+
+// ============================================================
+// Save / Destroy slot
+// ============================================================
+function saveSlot(el) {
+  if (el._view === 'text')  el._raw = el._textarea.value;
+  if (el._view === 'raw')   el._raw = tryParse(el._textarea.value);
+  if (el._view === 'table' && el._hot) el._raw = readHot(el._hot, el._type, el._multi);
+}
+
+function destroySlot(el) {
+  if (el._hot) { el._hot.destroy(); el._hot = null; }
+  if (el._parentHot && el._parentRow >= 0 && el._parentCol >= 0) {
+    el._parentHot.setDataAtCell(el._parentRow, el._parentCol, JSON.stringify(el._raw), 'cascade');
+    var meta = el._parentHot.getCellMeta(el._parentRow, el._parentCol);
+    meta._expanded = false;
+    meta._slot = null;
+    el._parentHot.render();
+  }
+  el.remove();
+}
+
+// ============================================================
+// Expand / Collapse cell
+// ============================================================
+function expandCell(hot, row, col) {
+  var meta = hot.getCellMeta(row, col);
+  var text = hot.getDataAtCell(row, col);
+  var raw = tryParse(text);
+  var t = typeOf(raw);
+  var parentSlot = findSlot(hot);
+  var parentEl = parentSlot ? parentSlot._children : document.getElementById('app');
+  var path = cellPath(hot, row, col);
+
+  var child = createSlot(parentEl, {
+    path: path,
+    raw: raw, type: t,
+    parentHot: hot, parentRow: row, parentCol: col,
+    showTable: isContainer(raw), noClose: false
+  });
+
+  meta._expanded = true;
+  meta._slot = child;
+  hot.render();
+
+  if (t === 'object' || t === 'array') switchView(child, 'table');
+  else if (t === 'string') switchView(child, 'text');
+  else switchView(child, 'raw');
+}
+
+function collapseCell(hot, row, col) {
+  var meta = hot.getCellMeta(row, col);
+  if (!meta._slot) return;
+  saveSlot(meta._slot);
+  destroySlot(meta._slot);
+}
+
+function findSlot(hot) {
+  for (var el = hot.rootElement.parentNode; el && el !== document.body; el = el.parentNode) {
+    if (el.classList && el.classList.contains('slot')) return el;
+  }
+  return null;
+}
+
+function cellPath(hot, row, col) {
+  var slot = findSlot(hot);
+  var base = slot ? (slot.querySelector('.slot-path').textContent || 'root') : 'root';
+  var headers = hot.getColHeader();
+  var multi = slot && slot._multi;
+  if (headers && col < headers.length) {
+    var key = headers[col].replace(/\s+\(.*\)$/, '');
+    return multi ? `${base}[${row}].${key}` : `${base}.${key}`;
+  }
+  return `${base}[${row}]`;
+}
+
+// ============================================================
+// Global state & init
+// ============================================================
 var S = { root: { $schema: 'null', data: 'null' } };
 
 function init() {
   S.root = { $schema: 'null', data: 'null' };
-  var r = slot(null, { isRoot: true, path: 'root', raw: S.root, type: 'object', showTable: true, noClose: true });
-  view(r, 'table');
+  var root = createSlot(null, {
+    isRoot: true, path: 'root',
+    raw: S.root, type: 'object',
+    showTable: true, noClose: true
+  });
+  switchView(root, 'table');
 }
 
-    document.addEventListener('DOMContentLoaded', init);
-  </script>
+document.addEventListener('DOMContentLoaded', init);
+</script>
 </body>
-
 </html>
