@@ -13,7 +13,7 @@
     .slot-bar { margin-bottom: 4px; }
     .slot-path { font-weight: bold; margin-right: 8px; }
     .btn { cursor: pointer; padding: 0 4px; background: #f0f0f0; font-family: monospace; user-select: none; }
-    .btn.active { background: #333; color: #fff; }
+    .btn.active { background: #1e40af; color: #fff; }
     .cell-btn { float: right; position: relative; z-index: 1; }
     .slot-txt { width: 480px; height: 160px; font: 13px monospace; resize: both; padding: 4px; box-sizing: border-box; overflow-x: auto; white-space: pre; }
     .handsontable td { white-space: nowrap; }
@@ -40,7 +40,7 @@
 </template>
 <script>
 // ============================================================
-// Helpers
+// 1. Helpers
 // ============================================================
 function tryParse(s) {
   try { return JSON.parse(s); } catch (e) { return s; }
@@ -50,11 +50,6 @@ function typeOf(v) {
   if (v === null) return 'null';
   if (Array.isArray(v)) return 'array';
   return typeof v;
-}
-
-function isContainer(v) {
-  var t = typeOf(v);
-  return t === 'object' || t === 'array';
 }
 
 function formatJSON(v) {
@@ -72,23 +67,7 @@ function formatJSON(v) {
 }
 
 // ============================================================
-// Cell renderer
-// ============================================================
-function cellRenderer(hot, td, row, col, prop, value, cellProperties) {
-  Handsontable.renderers.TextRenderer.apply(this, arguments);
-  if (value == null || value === '') { td.innerHTML = ''; return; }
-  var display = value.length > 80 ? `${value.slice(0, 80)}\u2026` : value;
-  var expanded = !!cellProperties._expanded;
-  td.innerHTML = `<span class="btn cell-btn${expanded ? ' active' : ''}">${expanded ? '[-]' : '[+]'}</span>${display}`;
-  if (value.length > 80) td.title = value;
-  td.querySelector('.cell-btn').addEventListener('mousedown', function (e) {
-    e.stopPropagation(); e.preventDefault();
-    expanded ? collapseCell(hot, row, col) : expandCell(hot, row, col);
-  });
-}
-
-// ============================================================
-// Handsontable factory
+// 2. Handsontable layer
 // ============================================================
 function makeHot(div, cfg) {
   return new Handsontable(div, Object.assign({
@@ -100,8 +79,22 @@ function makeHot(div, cfg) {
   }, cfg));
 }
 
+function cellRenderer(hot, td, row, col, prop, value, cellProperties) {
+  Handsontable.renderers.TextRenderer.apply(this, arguments);
+  if (value == null || value === '') { td.innerHTML = ''; return; }
+  var display = value.length > 80 ? `${value.slice(0, 80)}\u2026` : value;
+  var expanded = !!cellProperties._expanded;
+  td.innerHTML = `<span class="btn cell-btn${expanded ? ' active' : ''}">${expanded ? '[-]' : '[+]'}</span>${display}`;
+  if (value.length > 80) td.title = value;
+  td.querySelector('.cell-btn').addEventListener('mousedown', function (e) {
+    e.stopPropagation(); e.preventDefault();
+    if (expanded) collapseCell(hot, row, col);
+    else expandCell(hot, row, col);
+  });
+}
+
 // ============================================================
-// Slot factory
+// 3. Slot — create
 // ============================================================
 function createSlot(parentEl, opts) {
   var tpl = document.getElementById('slot-tmpl');
@@ -140,24 +133,22 @@ function createSlot(parentEl, opts) {
   el._rawTA    = el.querySelector('.slot-txt-raw');
   el._children = el.querySelector('.slot-children');
 
-  insertSorted(el, parentEl || document.getElementById('app'));
+  var container = parentEl || document.getElementById('app');
+  var kids = container.querySelectorAll(':scope > .slot');
+  var inserted = false;
+  for (var i = 0; i < kids.length; i++) {
+    if (kids[i]._parentRow > el._parentRow || (kids[i]._parentRow === el._parentRow && kids[i]._parentCol > el._parentCol)) {
+      container.insertBefore(el, kids[i]);
+      inserted = true;
+      break;
+    }
+  }
+  if (!inserted) container.appendChild(el);
   return el;
 }
 
-function insertSorted(el, container) {
-  var kids = container.querySelectorAll(':scope > .slot');
-  for (var i = 0; i < kids.length; i++) {
-    var k = kids[i];
-    if (k._parentRow > el._parentRow || (k._parentRow === el._parentRow && k._parentCol > el._parentCol)) {
-      container.insertBefore(el, k);
-      return;
-    }
-  }
-  container.appendChild(el);
-}
-
 // ============================================================
-// View switching
+// 4. Slot — view
 // ============================================================
 function switchView(el, view) {
   if (el._view === view) return;
@@ -182,7 +173,8 @@ function switchView(el, view) {
   }
   if (view === 'raw') {
     el._rawTA.style.display = 'block';
-    el._rawTA.value = isContainer(el._raw) ? formatJSON(el._raw) : JSON.stringify(el._raw);
+    var t = typeOf(el._raw);
+    el._rawTA.value = (t === 'object' || t === 'array') ? formatJSON(el._raw) : JSON.stringify(el._raw);
   }
 
   el._view = view;
@@ -192,23 +184,8 @@ function switchView(el, view) {
 }
 
 // ============================================================
-// Build hot
+// 5. Slot — hot I/O
 // ============================================================
-function bindCopyPaste(hot) {
-  hot.addHook('beforeCopy', function (data) { return data; });
-  hot.addHook('beforePaste', function (data) { return data; });
-}
-
-function bindAutoCollapse(hot) {
-  hot.addHook('beforeChange', function (changes, source) {
-    if (source === 'loadData' || source === 'cascade') return;
-    changes.forEach(function (ch) {
-      var meta = this.getCellMeta(ch[0], ch[1]);
-      if (meta._slot) { saveSlot(meta._slot); destroySlot(meta._slot); }
-    }, this);
-  });
-}
-
 function buildHot(el) {
   var raw = el._raw, type = el._type, div = el._hotDiv;
   var hot;
@@ -240,7 +217,7 @@ function buildHot(el) {
         }),
         colHeaders: allKeys, rowHeaders: true,
         columns: allKeys.map(function () { return { renderer: cellRenderer }; }),
-        manualRowMove: true, minSpareRows: 3
+        manualRowMove: true, minSpareRows: 2
       });
     } else {
       el._isMultiCol = false;
@@ -251,7 +228,7 @@ function buildHot(el) {
         data: arrData,
         colHeaders: [], rowHeaders: true,
         columns: [{ renderer: cellRenderer }],
-        manualRowMove: true, minSpareRows: 3
+        manualRowMove: true, minSpareRows: 2
       });
     }
   } else {
@@ -261,8 +238,15 @@ function buildHot(el) {
     });
   }
 
-  bindCopyPaste(hot);
-  bindAutoCollapse(hot);
+  hot.addHook('beforeCopy', function (data) { return data; });
+  hot.addHook('beforePaste', function (data) { return data; });
+  hot.addHook('beforeChange', function (changes, source) {
+    if (source === 'loadData' || source === 'cascade') return;
+    changes.forEach(function (ch) {
+      var meta = this.getCellMeta(ch[0], ch[1]);
+      if (meta._slot) { saveSlot(meta._slot); destroySlot(meta._slot); }
+    }, this);
+  });
   hot.addHook('afterChange', function (changes, source) {
     if (source === 'loadData') return;
     el._raw = readHot(el._hot, el._type, el._isMultiCol);
@@ -285,9 +269,6 @@ function buildHot(el) {
   return hot;
 }
 
-// ============================================================
-// Read hot → raw value
-// ============================================================
 function readHot(hot, type, multi) {
   var data = hot.getData();
 
@@ -324,21 +305,18 @@ function readHot(hot, type, multi) {
 }
 
 // ============================================================
-// Cascade up
-// ============================================================
-function cascadeUp(el) {
-  if (el._parentHot && el._parentRow >= 0 && el._parentCol >= 0) {
-    el._parentHot.setDataAtCell(el._parentRow, el._parentCol, JSON.stringify(el._raw), 'cascade');
-  }
-}
-
-// ============================================================
-// Save / Destroy
+// 6. Slot — lifecycle
 // ============================================================
 function saveSlot(el) {
   if (el._view === 'text')  el._raw = el._textTA.value;
   if (el._view === 'raw')   el._raw = tryParse(el._rawTA.value);
   if (el._view === 'table' && el._hot) el._raw = readHot(el._hot, el._type, el._isMultiCol);
+}
+
+function cascadeUp(el) {
+  if (el._parentHot && el._parentRow >= 0 && el._parentCol >= 0) {
+    el._parentHot.setDataAtCell(el._parentRow, el._parentCol, JSON.stringify(el._raw), 'cascade');
+  }
 }
 
 function destroySlot(el) {
@@ -362,14 +340,13 @@ function clearChildren(el) {
 }
 
 // ============================================================
-// Expand / Collapse
+// 7. Cell — expand / collapse
 // ============================================================
 function expandCell(hot, row, col) {
   var meta = hot.getCellMeta(row, col);
-  var text = hot.getDataAtCell(row, col);
-  var raw = tryParse(text);
+  var raw = tryParse(hot.getDataAtCell(row, col));
   var type = typeOf(raw);
-  var container = isContainer(raw);
+  var container = type === 'object' || type === 'array';
   var parentSlot = findSlot(hot);
   var parentEl = parentSlot ? parentSlot._children : document.getElementById('app');
 
@@ -415,7 +392,7 @@ function cellPath(hot, row, col) {
 }
 
 // ============================================================
-// Init
+// 8. Init
 // ============================================================
 var S = { root: { $schema: null, data: null } };
 
