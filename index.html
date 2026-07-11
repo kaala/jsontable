@@ -15,7 +15,7 @@
     .btn { cursor: pointer; padding: 0 4px; background: #f0f0f0; font-family: monospace; user-select: none; }
     .btn.active { background: #333; color: #fff; }
     .cell-btn { float: right; position: relative; z-index: 1; }
-    .slot-textarea { width: 480px; height: 160px; font: 13px monospace; resize: both; padding: 4px; box-sizing: border-box; }
+    .slot-txt { width: 480px; height: 160px; font: 13px monospace; resize: both; padding: 4px; box-sizing: border-box; overflow-x: auto; white-space: pre; }
     .handsontable td { white-space: nowrap; }
   </style>
 </head>
@@ -30,8 +30,11 @@
       <span class="btn btn-raw">RAW</span>
       <span class="btn btn-collapse">[-]</span>
     </div>
-    <div class="slot-hot"></div>
-    <textarea class="slot-textarea"></textarea>
+    <div class="slot-body">
+      <div class="slot-hot"></div>
+      <textarea class="slot-txt slot-txt-text"></textarea>
+      <textarea class="slot-txt slot-txt-raw"></textarea>
+    </div>
     <div class="slot-children"></div>
   </div>
 </template>
@@ -115,60 +118,78 @@ function createSlot(parentEl, opts) {
   el._multi = false;
 
   var bar = el.querySelector('.slot-bar');
-  el._btnTable   = bar.querySelector('.btn-table');
-  el._btnRaw     = bar.querySelector('.btn-raw');
-  el._btnText    = bar.querySelector('.btn-text');
-  el._btnClose   = bar.querySelector('.btn-collapse');
+  el._btnTable = bar.querySelector('.btn-table');
+  el._btnText  = bar.querySelector('.btn-text');
+  el._btnRaw   = bar.querySelector('.btn-raw');
+  el._btnClose = bar.querySelector('.btn-collapse');
 
   var isStr = opts.type === 'string';
   el._btnTable.style.display = opts.showTable ? '' : 'none';
-  el._btnRaw.style.display  = '';
   el._btnText.style.display  = isStr ? '' : 'none';
+  el._btnRaw.style.display   = '';
   el._btnClose.style.display = opts.noClose ? 'none' : '';
 
   el._btnTable.addEventListener('mousedown', function (e) { e.preventDefault(); switchView(el, 'table'); });
-  el._btnRaw.addEventListener('mousedown',  function (e) { e.preventDefault(); switchView(el, 'raw'); });
   el._btnText.addEventListener('mousedown',  function (e) { e.preventDefault(); switchView(el, 'text'); });
+  el._btnRaw.addEventListener('mousedown',   function (e) { e.preventDefault(); switchView(el, 'raw'); });
   el._btnClose.addEventListener('mousedown', function (e) { e.preventDefault(); saveSlot(el); destroySlot(el); });
 
   el._hot = null;
   el._view = '';
-  el._hotDiv = el.querySelector('.slot-hot');
-  el._textarea = el.querySelector('.slot-textarea');
+  el._hotDiv  = el.querySelector('.slot-hot');
+  el._textTA  = el.querySelector('.slot-txt-text');
+  el._rawTA   = el.querySelector('.slot-txt-raw');
   el._children = el.querySelector('.slot-children');
 
-  (parentEl || document.getElementById('app')).appendChild(el);
+  var container = parentEl || document.getElementById('app');
+  var kids = container.querySelectorAll(':scope > .slot');
+  var inserted = false;
+  for (var i = 0; i < kids.length; i++) {
+    if (kids[i]._parentRow > el._parentRow || (kids[i]._parentRow === el._parentRow && kids[i]._parentCol > el._parentCol)) {
+      container.insertBefore(el, kids[i]);
+      inserted = true;
+      break;
+    }
+  }
+  if (!inserted) container.appendChild(el);
   return el;
 }
 
 // ============================================================
-// View switching
+// View switching — each view has its own DOM element
 // ============================================================
 function switchView(el, view) {
   if (el._view === view) return;
-  saveSlot(el);
+
+  // save current table data & destroy hot + children
+  if (el._view === 'table' && el._hot) {
+    el._raw = readHot(el._hot, el._type, el._multi);
+    clearChildren(el);
+    el._hot.destroy();
+    el._hot = null;
+  }
 
   el._hotDiv.style.display = 'none';
-  el._textarea.style.display = 'none';
-  if (el._hot) { el._hot.destroy(); el._hot = null; }
+  el._textTA.style.display = 'none';
+  el._rawTA.style.display = 'none';
 
   if (view === 'table') {
     el._hotDiv.style.display = 'block';
     el._hot = buildHot(el);
   }
-  if (view === 'raw') {
-    el._textarea.style.display = 'block';
-    el._textarea.value = isContainer(el._raw) ? formatJSON(el._raw) : JSON.stringify(el._raw);
-  }
   if (view === 'text') {
-    el._textarea.style.display = 'block';
-    el._textarea.value = String(el._raw);
+    el._textTA.style.display = 'block';
+    el._textTA.value = String(el._raw);
+  }
+  if (view === 'raw') {
+    el._rawTA.style.display = 'block';
+    el._rawTA.value = isContainer(el._raw) ? formatJSON(el._raw) : JSON.stringify(el._raw);
   }
 
   el._view = view;
   el._btnTable.classList.toggle('active', view === 'table');
-  el._btnRaw.classList.toggle('active', view === 'raw');
   el._btnText.classList.toggle('active', view === 'text');
+  el._btnRaw.classList.toggle('active', view === 'raw');
 }
 
 // ============================================================
@@ -187,6 +208,13 @@ function buildHot(el) {
     });
     hot.addHook('beforeCopy', function (data) { return data; });
     hot.addHook('beforePaste', function (data) { return data; });
+    hot.addHook('beforeChange', function (changes, source) {
+      if (source === 'loadData' || source === 'cascade') return;
+      changes.forEach(function (ch) {
+        var meta = this.getCellMeta(ch[0], ch[1]);
+        if (meta._slot) { saveSlot(meta._slot); destroySlot(meta._slot); }
+      }, this);
+    });
     hot.addHook('afterChange', function (changes, source) {
       if (source === 'loadData') return;
       var r = this.getDataAtRow(0);
@@ -245,6 +273,13 @@ function buildHot(el) {
 
   hot.addHook('beforeCopy', function (data) { return data; });
   hot.addHook('beforePaste', function (data) { return data; });
+  hot.addHook('beforeChange', function (changes, source) {
+    if (source === 'loadData' || source === 'cascade') return;
+    changes.forEach(function (ch) {
+      var meta = this.getCellMeta(ch[0], ch[1]);
+      if (meta._slot) { saveSlot(meta._slot); destroySlot(meta._slot); }
+    }, this);
+  });
   hot.addHook('afterChange', function (changes, source) {
     if (source === 'loadData') return;
     el._raw = readHot(el._hot, el._type, el._multi);
@@ -311,13 +346,21 @@ function cascadeUp(el, raw) {
 // ============================================================
 // Save / Destroy slot
 // ============================================================
+function clearChildren(el) {
+  var kids = el._children.querySelectorAll(':scope > .slot');
+  for (var i = kids.length - 1; i >= 0; i--) {
+    destroySlot(kids[i]);
+  }
+}
+
 function saveSlot(el) {
-  if (el._view === 'text')  el._raw = el._textarea.value;
-  if (el._view === 'raw')   el._raw = tryParse(el._textarea.value);
+  if (el._view === 'text')  el._raw = el._textTA.value;
+  if (el._view === 'raw')   el._raw = tryParse(el._rawTA.value);
   if (el._view === 'table' && el._hot) el._raw = readHot(el._hot, el._type, el._multi);
 }
 
 function destroySlot(el) {
+  clearChildren(el);
   if (el._hot) { el._hot.destroy(); el._hot = null; }
   if (el._parentHot && el._parentRow >= 0 && el._parentCol >= 0) {
     el._parentHot.setDataAtCell(el._parentRow, el._parentCol, JSON.stringify(el._raw), 'cascade');
