@@ -7,23 +7,24 @@
   <script src="https://cdn.jsdelivr.net/npm/handsontable@14.6.0/dist/handsontable.full.min.js"></script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/handsontable@14.6.0/dist/handsontable.full.min.css">
   <style>
-    body { overflow-x: auto; padding: 8px; font-family: monospace; font-size: 13px; }
-    .slot { margin: 4px 0 4px 16px; border-left: 2px solid #ddd; padding-left: 12px; }
-    .slot-root { margin: 0; border-left: 0; padding-left: 0; }
-    .slot-bar { margin-bottom: 4px; }
-    .slot-path { font-weight: bold; margin-right: 8px; }
-    .btn { cursor: pointer; padding: 0 4px; background: #f0f0f0; font-family: monospace; user-select: none; }
-    .btn.active { background: #1e40af; color: #fff; }
-    .cell-btn { float: right; position: relative; z-index: 1; }
-    .slot-txt { width: 560px; height: 200px; font: 13px monospace; resize: both; padding: 4px; box-sizing: border-box; overflow-x: auto; white-space: pre; border: 1px solid #ddd; outline: none; }
-    .handsontable td { white-space: nowrap; }
+    body { padding: 8px; font: 13px monospace; }
+    .slot { margin: 8px; border-left: 1px solid #ddd; padding-left: 12px; }
+    .slot-root { border-left: 0; padding-left: 0; }
+    .slot-head { margin: 4px; }
+    .slot-path { font-weight: bold; margin-right: 16px; }
+    .slot-txt { width: 600px; height: 200px; font: 13px monospace; resize: both; overflow-x: auto; white-space: pre; }
+    .btn { cursor: pointer; padding: 0 4px; background: #eee; font: 13px monospace; user-select: none; }
+    .btn.active { background: #00f; color: #fff; }
+    .handsontable td { white-space: nowrap; font: 13px monospace; line-height: 21px; }
+    .cell-txt { padding-right: 16px; }
+    .cell-btn { float: right; position: relative; line-height: 21px; z-index: 10; }
   </style>
 </head>
 <body>
 <div id="app"></div>
-<template id="slot-tmpl">
+<template id="slot-template">
   <div class="slot">
-    <div class="slot-bar">
+    <div class="slot-head">
       <span class="slot-path"></span>
       <span class="btn btn-table">TABLE</span>
       <span class="btn btn-text">TEXT</span>
@@ -72,10 +73,10 @@ function formatJSON(v) {
 function makeHot(div, cfg) {
   return new Handsontable(div, Object.assign({
     licenseKey: 'non-commercial-and-evaluation',
+    editor: 'text',
     width: 'auto', height: 'auto',
     manualColumnResize: true,
     outsideClickDeselects: false, contextMenu: false,
-    editor: 'text'
   }, cfg));
 }
 
@@ -84,7 +85,7 @@ function cellRenderer(hot, td, row, col, prop, value, cellProperties) {
   if (value == null || value === '') { td.innerHTML = ''; return; }
   var display = value.length > 80 ? `${value.slice(0, 80)}\u2026` : value;
   var expanded = !!cellProperties._expanded;
-  td.innerHTML = `<span class="btn cell-btn${expanded ? ' active' : ''}">${expanded ? '[-]' : '[+]'}</span>${display}`;
+  td.innerHTML = `<span class="btn cell-btn${expanded ? ' active' : ''}">${expanded ? '[-]' : '[+]'}</span><span class="cell-txt">${display}</span>`;
   if (value.length > 80) td.title = value;
   td.querySelector('.cell-btn').addEventListener('mousedown', function (e) {
     e.stopPropagation(); e.preventDefault();
@@ -97,7 +98,7 @@ function cellRenderer(hot, td, row, col, prop, value, cellProperties) {
 // 3. Slot — create
 // ============================================================
 function createSlot(parentEl, opts) {
-  var tpl = document.getElementById('slot-tmpl');
+  var tpl = document.getElementById('slot-template');
   var el = tpl.content.cloneNode(true).querySelector('.slot');
   if (opts.isRoot) el.classList.add('slot-root');
 
@@ -109,11 +110,11 @@ function createSlot(parentEl, opts) {
   el._parentHot = opts.parentHot;
   el._isMultiCol = false;
 
-  var bar = el.querySelector('.slot-bar');
-  el._btnTable = bar.querySelector('.btn-table');
-  el._btnText  = bar.querySelector('.btn-text');
-  el._btnRaw   = bar.querySelector('.btn-raw');
-  el._btnClose = bar.querySelector('.btn-collapse');
+  var head = el.querySelector('.slot-head');
+  el._btnTable = head.querySelector('.btn-table');
+  el._btnText  = head.querySelector('.btn-text');
+  el._btnRaw   = head.querySelector('.btn-raw');
+  el._btnClose = head.querySelector('.btn-collapse');
 
   var isStringType = opts.type === 'string';
   el._btnTable.style.display = opts.showTable ? '' : 'none';
@@ -394,7 +395,7 @@ function cellPath(hot, row, col) {
 // ============================================================
 // 8. Init
 // ============================================================
-var S = { root: { $schema: null, data: null } };
+var S = {};
 
 function init() {
   S.root = { $schema: null, data: null };
