@@ -329,8 +329,7 @@ function buildHot(el) {
   var hot;
 
   function resolveSchema(el, raw) {
-    var schema = getSchema(el._path);
-    if (!el.classList.contains('slot-root')) schema = schema || inferSchema(raw);
+    var schema = getSchema(el._path) || inferSchema(raw);
     if (schema) enhanceSchema(schema, raw);
     return schema;
   }
