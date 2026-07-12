@@ -136,24 +136,26 @@ function inferSchema(value) {
   if (t === 'array' || t === 'matrix') {
     if (value.length === 0) return { type: 'array', items: {} };
     var itemSchemas = value.map(function (v) { return inferSchema(v); });
-    return { type: 'array', items: mergeSchemas(itemSchemas) };
+    var result = { type: 'array', items: mergeSchemas(itemSchemas) };
+    if (t === 'matrix') result['x-type'] = 'matrix';
+    return result;
   }
   if (t === 'number') return { type: Number.isInteger(value) ? 'integer' : 'number' };
   return { type: t };
 }
 
 function typeAnnotate(key, props) {
-  if (props && props[key] && props[key].type) {
-    return key + ' (' + props[key].type + ')';
-  }
-  return key;
+  var abbr = { string: 'str', number: 'num', integer: 'int', boolean: 'bool', object: 'obj', array: 'arr', matrix: 'mat', null: 'any' };
+  var p = props && props[key];
+  var t = p && (p['x-type'] || p.type);
+  return t ? key + ' (' + (abbr[t] || t) + ')' : key;
 }
 
 function columnDef(key, props) {
   if (props && props[key] && props[key].type === 'boolean') {
-    return { renderer: cellRenderer, type: 'dropdown', source: ['true', 'false'], allowInvalid: false };
+    return { type: 'dropdown', source: ['true', 'false'], allowInvalid: false };
   }
-  return { renderer: cellRenderer };
+  return {};
 }
 
 function getItemSchema(schema) {
@@ -170,6 +172,7 @@ function makeHot(div, cfg) {
   return new Handsontable(div, Object.assign({
     licenseKey: 'non-commercial-and-evaluation',
     editor: 'text',
+    renderer: cellRenderer,
     width: 'auto', height: 'auto',
     manualColumnResize: true,
     outsideClickDeselects: false, contextMenu: false,
@@ -322,27 +325,13 @@ function buildHot(el) {
       columns: ordered.map(function (k) { return columnDef(k, props); })
     });
   } else if (type === 'matrix') {
-    var maxCols = 0;
-    raw.forEach(function (row) {
-      if (row.length > maxCols) maxCols = row.length;
-    });
-    var colCount = maxCols + 3;
     var hotData = raw.map(function (row) {
-      var cells = [];
-      for (var c = 0; c < colCount; c++) {
-        cells.push(c < row.length ? JSON.stringify(row[c]) : '');
-      }
-      return cells;
+      return row.map(function (cell) { return JSON.stringify(cell); });
     });
-    var matrixCols = [];
-    for (var c = 0; c < colCount; c++) {
-      matrixCols.push({ renderer: cellRenderer });
-    }
     hot = makeHot(div, {
       data: hotData,
       colHeaders: true, rowHeaders: true,
-      columns: matrixCols,
-      manualRowMove: true, minSpareRows: 2
+      manualRowMove: true, minSpareRows: 2, minSpareCols: 3
     });
   } else if (type === 'array') {
     var schema = getSchema(el._path);
@@ -378,19 +367,15 @@ function buildHot(el) {
       hot = makeHot(div, {
         data: arrData,
         colHeaders: [], rowHeaders: true,
-        columns: [{ renderer: cellRenderer }],
         manualRowMove: true, minSpareRows: 2
       });
     }
   } else {
     hot = makeHot(div, {
-      data: [[JSON.stringify(raw)]],
-      columns: [{ renderer: cellRenderer }]
+      data: [[JSON.stringify(raw)]]
     });
   }
 
-  hot.addHook('beforeCopy', function (data) { return data; });
-  hot.addHook('beforePaste', function (data) { return data; });
   hot.addHook('beforeChange', function (changes, source) {
     if (source === 'loadData' || source === 'cascade') return;
     changes.forEach(function (ch) {
