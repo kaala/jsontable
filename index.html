@@ -135,34 +135,55 @@ function inferSchema(value) {
   }
   if (t === 'array' || t === 'matrix') {
     if (value.length === 0) return { type: 'array', items: {} };
-    var itemSchemas = value.map(function (v) { return inferSchema(v); });
-    var result = { type: 'array', items: mergeSchemas(itemSchemas) };
-    if (t === 'matrix') result['x-type'] = 'matrix';
-    return result;
+    return { type: 'array', items: mergeSchemas(value.map(function (v) { return inferSchema(v); })) };
   }
   if (t === 'number') return { type: Number.isInteger(value) ? 'integer' : 'number' };
   return { type: t };
 }
 
-function typeAnnotate(key, props) {
-  var abbr = { string: 'str', number: 'num', integer: 'int', boolean: 'bool', object: 'obj', array: 'arr', matrix: 'mat', null: 'any' };
-  var p = props && props[key];
-  var t = p && (p['x-type'] || p.type);
-  return t ? key + ' (' + (abbr[t] || t) + ')' : key;
-}
-
-function columnDef(key, props) {
-  if (props && props[key] && props[key].type === 'boolean') {
-    return { type: 'dropdown', source: ['true', 'false'], allowInvalid: false };
+function enhanceSchema(schema, raw) {
+  var t = typeOf(raw);
+  var xs;
+  if (t === 'object') {
+    if (!schema.properties) schema.properties = {};
+    var keys = Object.keys(raw || {});
+    keys.forEach(function (k) {
+      if (!schema.properties[k]) schema.properties[k] = inferSchema(raw[k]);
+    });
+    Object.keys(schema.properties).forEach(function (k) {
+      if (keys.indexOf(k) === -1) keys.push(k);
+    });
+    xs = { type: 'obj', keys: keys, coldef: {} };
+    keys.forEach(function (k) { enhanceSchema(schema.properties[k], raw[k]); });
+  } else if (t === 'array' || t === 'matrix') {
+    xs = { type: t === 'matrix' ? 'mat' : 'arr', coldef: {} };
+    if (!schema.items) schema.items = { type: 'object', properties: {} };
+    var items = schema.items;
+    if (!items.properties) items.properties = {};
+    var itemKeys = Object.keys(items.properties);
+    raw.forEach(function (it) {
+      if (it) Object.keys(it).forEach(function (k) {
+        if (itemKeys.indexOf(k) === -1) {
+          itemKeys.push(k);
+          items.properties[k] = inferSchema(it[k]);
+        }
+      });
+    });
+    if (itemKeys.length > 0) {
+      var sample = (raw && raw.length > 0) ? raw[0] : {};
+      itemKeys.forEach(function (k) { enhanceSchema(items.properties[k], sample[k]); });
+      items['x-schema'] = { type: 'obj', keys: itemKeys, obj: true, coldef: {} };
+    }
+  } else if (t === 'number') {
+    xs = { type: Number.isInteger(raw) ? 'int' : 'num', coldef: {} };
+  } else if (t === 'boolean') {
+    xs = { type: 'bool', coldef: { type: 'dropdown', source: ['true', 'false'], allowInvalid: false } };
+  } else if (t === 'null') {
+    xs = { type: 'any', coldef: {} };
+  } else {
+    xs = { type: 'str', coldef: {} };
   }
-  return {};
-}
-
-function getItemSchema(schema) {
-  if (schema && schema.type === 'array' && schema.items && typeof schema.items === 'object') {
-    return schema.items;
-  }
-  return null;
+  schema['x-schema'] = xs;
 }
 
 // ============================================================
@@ -186,7 +207,7 @@ function cellRenderer(hot, td, row, col, prop, value, cellProperties) {
   var display = value;
   var title = '';
   if (value.length > 40) {
-    display = value.slice(0, 40) + '...';
+    display = `${value.slice(0, 40)}...`;
     title = formatJSON(tryParse(value));
   }
   td.title = title;
@@ -307,22 +328,30 @@ function buildHot(el) {
   var raw = el._raw, type = el._type, div = el._hotDiv;
   var hot;
 
-  if (type === 'object') {
+  function resolveSchema(el, raw) {
     var schema = getSchema(el._path);
     if (!el.classList.contains('slot-root')) schema = schema || inferSchema(raw);
-    var objKeys = raw ? Object.keys(raw) : [];
-    var schemaKeys = (schema && schema.properties) ? Object.keys(schema.properties) : [];
-    var ordered = schemaKeys.length ? schemaKeys.slice() : objKeys.slice();
-    if (schemaKeys.length) {
-      objKeys.forEach(function (k) {
-        if (ordered.indexOf(k) === -1) ordered.push(k);
-      });
-    }
+    if (schema) enhanceSchema(schema, raw);
+    return schema;
+  }
+
+  if (type === 'object') {
+    var schema = resolveSchema(el, raw);
+    var xs = schema && schema['x-schema'];
+    var ordered = (xs && xs.keys) ? xs.keys.slice() : Object.keys(raw || {});
     var props = schema && schema.properties;
+    var headers = [];
+    var columns = [];
+    for (var i = 0; i < ordered.length; i++) {
+      var ks = ordered[i];
+      var pxs = props[ks]['x-schema'];
+      headers.push(`${ks} (${pxs.type})`);
+      columns.push(pxs.coldef);
+    }
     hot = makeHot(div, {
       data: [ordered.map(function (k) { return JSON.stringify(k in raw ? raw[k] : null); })],
-      colHeaders: ordered.map(function (k) { return typeAnnotate(k, props); }),
-      columns: ordered.map(function (k) { return columnDef(k, props); })
+      colHeaders: headers,
+      columns: columns
     });
   } else if (type === 'matrix') {
     var hotData = raw.map(function (row) {
@@ -334,31 +363,37 @@ function buildHot(el) {
       manualRowMove: true, minSpareRows: 2, minSpareCols: 3
     });
   } else if (type === 'array') {
-    var schema = getSchema(el._path);
-    if (!el.classList.contains('slot-root')) schema = schema || inferSchema(raw);
-    var itemSchema = getItemSchema(schema);
-    var schemaKeys = (itemSchema && itemSchema.properties) ? Object.keys(itemSchema.properties) : [];
-    var isObjArray = schemaKeys.length > 0 || (
+    var schema = resolveSchema(el, raw);
+    var itemSchema = null;
+    if (schema && schema.type === 'array' && schema.items && typeof schema.items === 'object') {
+      itemSchema = schema.items;
+    }
+    var xs = itemSchema && itemSchema['x-schema'];
+    var schemaKeys = (xs && xs.keys) || [];
+    var isObjArray = (xs && xs.obj) || (
       raw.length > 0 && raw.every(function (it) {
         return it != null && typeof it === 'object' && !Array.isArray(it);
       })
     );
     if (isObjArray) {
       var ordered = schemaKeys.slice();
-      raw.forEach(function (it) {
-        if (it) Object.keys(it).forEach(function (k) {
-          if (ordered.indexOf(k) === -1) ordered.push(k);
-        });
-      });
       var props = itemSchema && itemSchema.properties;
+      var headers = [];
+      var columns = [];
+      for (var i = 0; i < ordered.length; i++) {
+        var ks = ordered[i];
+        var pxs = props[ks]['x-schema'];
+        headers.push(`${ks} (${pxs.type})`);
+        columns.push(pxs.coldef);
+      }
       hot = makeHot(div, {
         data: raw.map(function (it) {
           return ordered.map(function (k) {
             return JSON.stringify(it && k in it ? it[k] : null);
           });
         }),
-        colHeaders: ordered.map(function (k) { return typeAnnotate(k, props); }), rowHeaders: true,
-        columns: ordered.map(function (k) { return columnDef(k, props); }),
+        colHeaders: headers, rowHeaders: true,
+        columns: columns,
         manualRowMove: true, minSpareRows: 2
       });
     } else {
@@ -467,7 +502,10 @@ function cascadeUp(el) {
 
 function destroySlot(el) {
   clearChildren(el);
-  if (el._hot) { el._hot.destroy(); el._hot = null; }
+  if (el._hot) {
+    el._hot.destroy();
+    el._hot = null;
+  }
   if (el._parentHot && el._parentRow >= 0 && el._parentCol >= 0) {
     cascadeUp(el);
     var meta = el._parentHot.getCellMeta(el._parentRow, el._parentCol);
