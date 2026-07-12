@@ -400,7 +400,7 @@ function buildHot(el) {
       if (arrData.length === 0) arrData = [['']];
       hot = makeHot(div, {
         data: arrData,
-        colHeaders: [], rowHeaders: true,
+        colHeaders: [''], rowHeaders: true,
         manualRowMove: true, minSpareRows: 2
       });
     }
@@ -468,7 +468,8 @@ function readHot(hot, type) {
       return r.some(function (c) { return c != null && c !== ''; });
     });
     var hdrs = hot.getColHeader();
-    if (hdrs.length > 0) {
+    if (hdrs && hdrs.length > 0) {
+      if (hdrs[0] === '') return rows.map(function (r) { return tryParse(r[0]); });
       var keys = hdrs.map(function (s) { return s.replace(/\s+\(.*\)$/, ''); });
       return rows.map(function (r) {
         var o = {};
