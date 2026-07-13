@@ -41,7 +41,7 @@
 </template>
 <script>
 // ============================================================
-// 1. Helpers
+// 1. Utils
 // ============================================================
 function tryParse(s) {
   try { return JSON.parse(s); } catch (e) { return s; }
@@ -91,6 +91,9 @@ function pathString(path) {
   return s;
 }
 
+// ============================================================
+// 2. Schema
+// ============================================================
 function getSchema(path) {
   var schema = S.root.$schema;
   if (!schema || typeof schema !== 'object') return null;
@@ -215,8 +218,145 @@ function enhanceSchema(schema, raw) {
   schema['x-schema'] = xs;
 }
 
+function resolveSchema(path, raw) {
+  var schema = getSchema(path) || inferSchema(raw);
+  if (schema) enhanceSchema(schema, raw);
+  return schema;
+}
+
 // ============================================================
-// 2. Handsontable layer
+// 3. Table config (data layer)
+// ============================================================
+function schemaCols(props, keys) {
+  var headers = [];
+  var columns = [];
+  for (var i = 0; i < keys.length; i++) {
+    var xs = props[keys[i]]['x-schema'];
+    headers.push(keys[i] + ' (' + xs.type + ')');
+    columns.push(xs.coldef);
+  }
+  return { headers: headers, columns: columns };
+}
+
+function buildObjectConfig(path, raw) {
+  var schema = resolveSchema(path, raw);
+  var xs = schema && schema['x-schema'];
+  var keys = (xs && xs.keys) ? xs.keys.slice() : Object.keys(raw || {});
+  var props = schema ? schema.properties : {};
+  var cols = schemaCols(props, keys);
+  return {
+    keys: keys,
+    hot: {
+      data: [keys.map(function (k) { return JSON.stringify(k in raw ? raw[k] : null); })],
+      colHeaders: cols.headers,
+      columns: cols.columns
+    }
+  };
+}
+
+function buildMatrixConfig(raw) {
+  return {
+    keys: null,
+    hot: {
+      data: raw.map(function (row) {
+        return row.map(function (cell) { return JSON.stringify(cell); });
+      }),
+      colHeaders: true, rowHeaders: true,
+      manualRowMove: true, minSpareRows: 2, minSpareCols: 3
+    }
+  };
+}
+
+function buildArrayConfig(path, raw) {
+  if (raw.length === 0) {
+    return {
+      keys: null,
+      hot: {
+        data: [['']],
+        colHeaders: true, rowHeaders: true,
+        manualRowMove: true, minSpareRows: 2
+      }
+    };
+  }
+  var schema = resolveSchema(path, raw);
+  var itemSchema = null;
+  if (schema && schema.type === 'array' && schema.items && typeof schema.items === 'object') {
+    itemSchema = schema.items;
+  }
+  var xs = itemSchema && itemSchema['x-schema'];
+  var isObjArray = (xs && xs.obj) || (
+    raw.length > 0 && raw.every(function (it) {
+      return it != null && typeof it === 'object' && !Array.isArray(it);
+    })
+  );
+  if (isObjArray) {
+    var keys = (xs && xs.keys) || [];
+    var props = itemSchema ? itemSchema.properties : {};
+    var cols = schemaCols(props, keys);
+    return {
+      keys: keys,
+      hot: {
+        data: raw.map(function (it) {
+          return keys.map(function (k) { return JSON.stringify(it && k in it ? it[k] : null); });
+        }),
+        colHeaders: cols.headers, rowHeaders: true,
+        columns: cols.columns,
+        manualRowMove: true, minSpareRows: 2
+      }
+    };
+  }
+  var arrData = raw.map(function (it) { return [JSON.stringify(it)]; });
+  return {
+    keys: null,
+    hot: {
+      data: arrData,
+      colHeaders: true, rowHeaders: true,
+      manualRowMove: true, minSpareRows: 2
+    }
+  };
+}
+
+function readData(data, keys, type) {
+  if (type === 'object') {
+    var row = data[0] || [];
+    var obj = {};
+    for (var i = 0; i < keys.length; i++) {
+      obj[keys[i]] = tryParse(row[i]);
+    }
+    return obj;
+  }
+
+  if (type === 'matrix') {
+    var rows = data.map(function (r) {
+      var end = r.length;
+      while (end > 0 && (r[end - 1] == null || r[end - 1] === '')) end--;
+      return r.slice(0, end).map(function (c) { return tryParse(c); });
+    });
+    while (rows.length > 0 && rows[rows.length - 1].length === 0) rows.pop();
+    return rows;
+  }
+
+  if (type === 'array') {
+    var rows = data.filter(function (r) {
+      return r.some(function (c) { return c != null && c !== ''; });
+    });
+    if (keys && keys.length > 0) {
+      return rows.map(function (r) {
+        var o = {};
+        for (var j = 0; j < keys.length; j++) {
+          if (r[j] != null) o[keys[j]] = tryParse(r[j]);
+        }
+        return o;
+      });
+    }
+    return rows.map(function (r) { return tryParse(r[0]); });
+  }
+
+  return tryParse(data[0] && data[0][0]);
+}
+
+// ============================================================
+// 4. Hot renderer
 // ============================================================
 function makeHot(div, cfg) {
   return new Handsontable(div, Object.assign({
@@ -256,8 +396,15 @@ function cellRenderer(hot, td, row, col, prop, value, cellProperties) {
 }
 
 // ============================================================
-// 3. Slot — create
+// 5. Slot
 // ============================================================
+function findSlot(hot) {
+  for (var parent = hot.rootElement.parentNode; parent && parent !== document.body; parent = parent.parentNode) {
+    if (parent.classList && parent.classList.contains('slot')) return parent;
+  }
+  return null;
+}
+
 function createSlot(parentEl, opts) {
   var tpl = document.getElementById('slot-template');
   var el = tpl.content.cloneNode(true).querySelector('.slot');
@@ -310,9 +457,6 @@ function createSlot(parentEl, opts) {
   return el;
 }
 
-// ============================================================
-// 4. Slot — view
-// ============================================================
 function switchView(el, view) {
   if (el._view === view) return;
   saveSlot(el);
@@ -350,114 +494,6 @@ function switchView(el, view) {
   el._btnRaw.classList.toggle('active', view === 'raw');
 }
 
-// ============================================================
-// 5. Slot — hot I/O
-// ============================================================
-// --- data layer (no DOM) ---
-
-// resolveSchema — getSchema by path, fallback to inferSchema, then enhance
-function resolveSchema(path, raw) {
-  var schema = getSchema(path) || inferSchema(raw);
-  if (schema) enhanceSchema(schema, raw);
-  return schema;
-}
-
-// schemaCols — build typed headers + column configs from schema properties
-function schemaCols(props, keys) {
-  var headers = [];
-  var columns = [];
-  for (var i = 0; i < keys.length; i++) {
-    var pxs = props[keys[i]]['x-schema'];
-    headers.push(keys[i] + ' (' + pxs.type + ')');
-    columns.push(pxs.coldef);
-  }
-  return { headers: headers, columns: columns };
-}
-
-// buildObjectConfig — single row, schema keys as columns
-function buildObjectConfig(path, raw) {
-  var schema = resolveSchema(path, raw);
-  var xs = schema && schema['x-schema'];
-  var keys = (xs && xs.keys) ? xs.keys.slice() : Object.keys(raw || {});
-  var props = schema ? schema.properties : {};
-  var cols = schemaCols(props, keys);
-  return {
-    keys: keys,
-    hot: {
-      data: [keys.map(function (k) { return JSON.stringify(k in raw ? raw[k] : null); })],
-      colHeaders: cols.headers,
-      columns: cols.columns
-    }
-  };
-}
-
-// buildMatrixConfig — multi-row, multi-col, JSON.stringify per cell
-function buildMatrixConfig(raw) {
-  return {
-    keys: null,
-    hot: {
-      data: raw.map(function (row) {
-        return row.map(function (cell) { return JSON.stringify(cell); });
-      }),
-      colHeaders: true, rowHeaders: true,
-      manualRowMove: true, minSpareRows: 2, minSpareCols: 3
-    }
-  };
-}
-
-// buildArrayConfig — object-array -> multi-col; otherwise single-col
-function buildArrayConfig(path, raw) {
-  if (raw.length === 0) {
-    return {
-      keys: null,
-      hot: {
-        data: [['']],
-        colHeaders: true, rowHeaders: true,
-        manualRowMove: true, minSpareRows: 2
-      }
-    };
-  }
-  var schema = resolveSchema(path, raw);
-  var itemSchema = null;
-  if (schema && schema.type === 'array' && schema.items && typeof schema.items === 'object') {
-    itemSchema = schema.items;
-  }
-  var xs = itemSchema && itemSchema['x-schema'];
-  var isObjArray = (xs && xs.obj) || (
-    raw.length > 0 && raw.every(function (it) {
-      return it != null && typeof it === 'object' && !Array.isArray(it);
-    })
-  );
-  if (isObjArray) {
-    var keys = (xs && xs.keys) || [];
-    var props = itemSchema ? itemSchema.properties : {};
-    var cols = schemaCols(props, keys);
-    return {
-      keys: keys,
-      hot: {
-        data: raw.map(function (it) {
-          return keys.map(function (k) { return JSON.stringify(it && k in it ? it[k] : null); });
-        }),
-        colHeaders: cols.headers, rowHeaders: true,
-        columns: cols.columns,
-        manualRowMove: true, minSpareRows: 2
-      }
-    };
-  }
-  var arrData = raw.map(function (it) { return [JSON.stringify(it)]; });
-  return {
-    keys: null,
-    hot: {
-      data: arrData,
-      colHeaders: true, rowHeaders: true,
-      manualRowMove: true, minSpareRows: 2
-    }
-  };
-}
-
-// --- DOM layer ---
-
-// buildHot — dispatch by type, create Hot, set el._keys, attach hooks
 function buildHot(el) {
   var type = el._type;
   var path = el._path;
@@ -506,47 +542,6 @@ function buildHot(el) {
   return hot;
 }
 
-// readData — pure data: 2D array + keys + type → parsed value
-function readData(data, keys, type) {
-  if (type === 'object') {
-    var row = data[0] || [];
-    var obj = {};
-    for (var i = 0; i < keys.length; i++) {
-      obj[keys[i]] = tryParse(row[i]);
-    }
-    return obj;
-  }
-
-  if (type === 'matrix') {
-    var rows = data.map(function (r) {
-      var end = r.length;
-      while (end > 0 && (r[end - 1] == null || r[end - 1] === '')) end--;
-      return r.slice(0, end).map(function (c) { return tryParse(c); });
-    });
-    while (rows.length > 0 && rows[rows.length - 1].length === 0) rows.pop();
-    return rows;
-  }
-
-  if (type === 'array') {
-    var rows = data.filter(function (r) {
-      return r.some(function (c) { return c != null && c !== ''; });
-    });
-    if (keys && keys.length > 0) {
-      return rows.map(function (r) {
-        var o = {};
-        for (var j = 0; j < keys.length; j++) {
-          if (r[j] != null) o[keys[j]] = tryParse(r[j]);
-        }
-        return o;
-      });
-    }
-    return rows.map(function (r) { return tryParse(r[0]); });
-  }
-
-  return tryParse(data[0] && data[0][0]);
-}
-
-// readHot — DOM adapter: extract data+keys from Hot, delegate to readData
 function readHot(hot, type) {
   var data = hot.getData();
   var slot = findSlot(hot);
@@ -554,9 +549,6 @@ function readHot(hot, type) {
   return readData(data, keys, type);
 }
 
-// ============================================================
-// 6. Slot — lifecycle
-// ============================================================
 function saveSlot(el) {
   if (el._view === 'text')  el._raw = el._textTA.value;
   if (el._view === 'raw')   el._raw = tryParse(el._rawTA.value);
@@ -594,46 +586,8 @@ function clearChildren(el) {
 }
 
 // ============================================================
-// 7. Cell — expand / collapse
+// 6. Cell
 // ============================================================
-function expandCell(hot, row, col) {
-  var meta = hot.getCellMeta(row, col);
-  var raw = tryParse(hot.getDataAtCell(row, col));
-  var type = typeOf(raw);
-  var container = type === 'object' || type === 'array' || type === 'matrix';
-  var parentSlot = findSlot(hot);
-  var parentEl = parentSlot ? parentSlot._children : document.getElementById('app');
-
-  var child = createSlot(parentEl, {
-    path: cellPath(hot, row, col),
-    raw: raw, type: type,
-    parentHot: hot, parentRow: row, parentCol: col,
-    showTable: container, noCollapse: false
-  });
-
-  meta._expanded = true;
-  meta._slot = child;
-  hot.render();
-
-  if (container) switchView(child, 'table');
-  else if (type === 'string') switchView(child, 'text');
-  else switchView(child, 'raw');
-}
-
-function collapseCell(hot, row, col) {
-  var meta = hot.getCellMeta(row, col);
-  if (!meta._slot) return;
-  saveSlot(meta._slot);
-  destroySlot(meta._slot);
-}
-
-function findSlot(hot) {
-  for (var parent = hot.rootElement.parentNode; parent && parent !== document.body; parent = parent.parentNode) {
-    if (parent.classList && parent.classList.contains('slot')) return parent;
-  }
-  return null;
-}
-
 function cellPath(hot, row, col) {
   var slot = findSlot(hot);
   var base = slot._path;
@@ -648,8 +602,39 @@ function cellPath(hot, row, col) {
   return base.concat([row]);
 }
 
+function expandCell(hot, row, col) {
+  var meta = hot.getCellMeta(row, col);
+  var raw = tryParse(hot.getDataAtCell(row, col));
+  var type = typeOf(raw);
+  var hasTable = type === 'object' || type === 'array' || type === 'matrix';
+  var parentSlot = findSlot(hot);
+  var parentEl = parentSlot ? parentSlot._children : document.getElementById('app');
+
+  var child = createSlot(parentEl, {
+    path: cellPath(hot, row, col),
+    raw: raw, type: type,
+    parentHot: hot, parentRow: row, parentCol: col,
+    showTable: hasTable, noCollapse: false
+  });
+
+  meta._expanded = true;
+  meta._slot = child;
+  hot.render();
+
+  if (hasTable) switchView(child, 'table');
+  else if (type === 'string') switchView(child, 'text');
+  else switchView(child, 'raw');
+}
+
+function collapseCell(hot, row, col) {
+  var meta = hot.getCellMeta(row, col);
+  if (!meta._slot) return;
+  saveSlot(meta._slot);
+  destroySlot(meta._slot);
+}
+
 // ============================================================
-// 8. Init
+// 7. Init
 // ============================================================
 var S = {};
 
