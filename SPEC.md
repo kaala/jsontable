@@ -37,7 +37,7 @@
 
 | 视图 | 按钮 | 可见条件 | 说明 |
 |------|------|---------|------|
-| **TABLE** | TABLE | object / array | Handsontable 子表格，结构化编辑 |
+| **TABLE** | TABLE | object / array / matrix | Handsontable 子表格，结构化编辑 |
 | **TEXT** | TEXT | 仅 string | 原始字符串 textarea，无引号无转义 |
 | **RAW** | RAW | 所有类型 | JSON 格式 textarea，显示 `formatJSON` 输出 |
 
@@ -56,14 +56,15 @@
 
 | JSON 类型 | 表格形态 | 配置 |
 |-----------|---------|------|
-| **object** | 单行，属性名为列头 | `colHeaders: keys`，每列 `renderer: cellRenderer` |
-| **array（元素均为 object）** | 多列，自动合并所有对象的 key 为列头 | `isMultiCol = true`，`rowHeaders: true`，`minSpareRows: 2`，`manualRowMove: true` |
+| **object** | 单行，属性名为列头（带类型标注） | `colHeaders: keys`，每列 `renderer: cellRenderer` |
+| **matrix**（元素均为 array 的 array） | 多行多列表格 | `rowHeaders: true`，`colHeaders: true`，`minSpareRows: 2`，`minSpareCols: 3`，`manualRowMove: true` |
+| **array（元素均为 object）** | 多列，自动合并所有对象的 key 为列头（带类型标注） | `rowHeaders: true`，`minSpareRows: 2`，`manualRowMove: true` |
 | **array（其他）** | 单列，行表头 | `rowHeaders: true`，`minSpareRows: 2`，`manualRowMove: true` |
 | **原始类型** | 单单元格 | 无行/列表头 |
 
 ### 4.2 单元格操作
 
-- **`[+]` 按钮**：解析单元格 JSON 字符串为原始值，创建子 Slot，若为 object/array 则默认切换到 TABLE 视图，若为 string 则默认切换到 TEXT 视图，否则切换到 RAW 视图
+- **`[+]` 按钮**：解析单元格 JSON 字符串为原始值，创建子 Slot，若为 object/array/matrix 则默认切换到 TABLE 视图，若为 string 则默认切换到 TEXT 视图，否则切换到 RAW 视图
 - **`[-]` 按钮**：保存当前 Slot 数据，销毁子 Slot 及其所有后代，父单元格恢复折叠状态
 - **内联编辑**：双击进入 Handsontable 编辑器，编辑的是 JSON 字符串
 
@@ -83,8 +84,6 @@
 
 ### 4.6 已移除的功能
 
-- Schema 自动推导：已移除，`$schema` 列为纯数据列，无特殊逻辑
-- 列头类型提示：已移除
 - 列宽裁剪（320px 上限）：已移除
 - `S.instances` 实例管理：已移除，Hot 实例直接挂在 Slot DOM 元素上
 
@@ -103,8 +102,7 @@ S = {
 
 每个 Slot DOM 元素的关键属性：
 - `_raw` — 当前编辑的原始 JSON 值
-- `_type` — 值类型（'object' | 'array' | 'string' | 'number' | 'boolean' | 'null'）
+- `_type` — 值类型（'object' | 'array' | 'matrix' | 'string' | 'number' | 'boolean' | 'null'）
 - `_hot` — Handsontable 实例引用
 - `_view` — 当前激活视图（'table' | 'text' | 'raw'）
 - `_parentRow` / `_parentCol` / `_parentHot` — 父表格引用，用于级联更新和 DOM 排序
-- `_isMultiCol` — array 是否为多列表格

@@ -2,18 +2,17 @@
 
 ## 文件结构
 
-单文件 `index.html`，分 8 个代码段，共 18 个函数：
+单文件 `index.html`，分 7 个代码段，共 30 个函数：
 
 | 段 | 内容 | 函数 |
 |----|------|------|
-| 1. Helpers | 工具函数 | `tryParse`, `typeOf`, `formatJSON` |
-| 2. Handsontable layer | Hot 工厂与渲染器 | `makeHot`, `cellRenderer` |
-| 3. Slot — create | Slot DOM 创建与排序插入 | `createSlot` |
-| 4. Slot — view | 视图切换 | `switchView` |
-| 5. Slot — hot I/O | Hot 构建与数据读写 | `buildHot`, `readHot` |
-| 6. Slot — lifecycle | 保存/级联/销毁/清理 | `saveSlot`, `cascadeUp`, `destroySlot`, `clearChildren` |
-| 7. Cell — expand / collapse | 单元格展开/折叠 | `expandCell`, `collapseCell`, `findSlot`, `cellPath` |
-| 8. Init | 全局状态与初始化 | `init`（+ `S` 全局对象） |
+| 1. Utils | 工具函数 | `tryParse`, `esc`, `typeOf`, `formatJSON`, `pathString` |
+| 2. Schema | JSON Schema 解析与推导 | `getSchema`, `mergeSchemas`, `inferSchema`, `enhanceSchema`, `resolveSchema` |
+| 3. Table config | 表格数据层（纯函数） | `schemaCols`, `buildObjectConfig`, `buildMatrixConfig`, `buildArrayConfig`, `readData` |
+| 4. Hot renderer | Hot 工厂与渲染器 | `makeHot`, `cellRenderer` |
+| 5. Slot | Slot DOM 创建、视图、数据读写、生命周期 | `findSlot`, `createSlot`, `switchView`, `buildHot`, `readHot`, `saveSlot`, `cascadeUp`, `destroySlot`, `clearChildren` |
+| 6. Cell | 单元格展开/折叠 | `cellPath`, `expandCell`, `collapseCell` |
+| 7. Init | 全局状态与初始化 | `init`（+ `S` 全局对象） |
 
 ---
 
@@ -24,9 +23,9 @@
   <div id="app">
     <!-- Slots 动态插入此处，嵌套结构 -->
   </div>
-  <template id="slot-tmpl">
+  <template id="slot-template">
     <div class="slot">
-      <div class="slot-bar">
+      <div class="slot-head">
         <span class="slot-path"></span>        <!-- 路径显示，如 root.data.items[0].name -->
         <span class="btn btn-table">TABLE</span>
         <span class="btn btn-text">TEXT</span>
@@ -48,67 +47,77 @@
 
 | 类型 | TABLE | TEXT | RAW | [-] |
 |------|-------|------|-----|-----|
-| object / array | 显示 | 隐藏 | 显示 | 显示 |
+| object / array / matrix | 显示 | 隐藏 | 显示 | 显示 |
 | string | 隐藏 | 显示 | 显示 | 显示 |
 | number / boolean / null | 隐藏 | 隐藏 | 显示 | 显示 |
-| root | 显示 | 隐藏 | 显示 | 隐藏（`noClose: true`） |
+| root | 显示 | 隐藏 | 显示 | 隐藏（`noCollapse: true`） |
 
 ### 视图切换流程
 
 ```
 switchView(el, 'table'):
-  1. 如果当前是 TABLE → 先从 Hot 读取 _raw，清理子 Slot，销毁 Hot
-  2. 隐藏所有视图 DOM
-  3. 显示目标视图 DOM
-  4. 根据目标视图初始化内容：
-     - table → buildHot(el)（创建新 Hot 实例）
-     - text  → textarea.value = String(_raw)
-     - raw   → textarea.value = formatJSON(_raw)
-  5. 高亮对应按钮
+  1. 如果当前视图与目标相同 → 直接返回
+  2. saveSlot(el) 保存当前视图数据到 _raw
+  3. 如果当前是 TABLE → clearChildren(el) 清理子 Slot，销毁 Hot
+  4. 隐藏所有视图 DOM
+  5. 显示目标视图 DOM
+  6. 根据目标视图初始化内容：
+      - table → buildHot(el)（创建新 Hot 实例）
+      - text  → textarea.value = String(_raw)
+      - raw   → textarea.value = formatJSON(_raw)（或 JSON.stringify 用于原始类型）
+  7. 高亮对应按钮（toggle .active class）
 ```
 
 ---
 
 ## 核心实现逻辑
 
+### Schema（数据层）
+
+- `getSchema(path)` — 从 `S.root.$schema` 树中按路径查找 JSON Schema
+- `mergeSchemas(list)` — 合并多个 schema（用于 array 元素推断）
+- `inferSchema(value)` — 从实际数据逆向推导 JSON Schema 结构
+- `enhanceSchema(schema, raw)` — 向 schema 节点附加 `x-schema` 元数据（类型标注、key 列表、coldef）
+- `resolveSchema(path, raw)` — 查找或推导 schema，然后调用 enhanceSchema 增强
+
 ### buildHot（构建子表格）
 
 根据 `_type` 和 `_raw` 创建不同形态的 Handsontable：
 
-1. **object** → 单行，key 为列头，每列值 = `JSON.stringify(raw[key])`
-2. **array** → 判定元素是否全为 object：
-   - 是 → 多列，收集所有 key 为列头，每行每列值 = `JSON.stringify(item[key])`
+1. **object** → 单行，key 为列头（带类型标注如 `name (str)`），每列值 = `JSON.stringify(raw[key])`
+2. **matrix** → 多行多列，行列表头，`manualRowMove`，`minSpareRows: 2`，`minSpareCols: 3`
+3. **array** → 判定元素是否全为 object：
+   - 是 → 多列，收集所有 key 为列头（带类型标注），每行每列值 = `JSON.stringify(item[key])`
    - 否 → 单列，每行值 = `JSON.stringify(item)`
-3. **其他** → 单单元格，值 = `JSON.stringify(raw)`
+4. **其他** → 单单元格，值 = `JSON.stringify(raw)`
 
 全局配置通过 `makeHot` 统一注入：`licenseKey`、`width: 'auto'`、`height: 'auto'`、`manualColumnResize: true`、`outsideClickDeselects: false`、`contextMenu: false`、`editor: 'text'`。
 
 Hot 钩子：
-- `beforeCopy` → 直接返回 data（透传）
-- `beforePaste` → 直接返回 data（透传）
 - `beforeChange`（非 loadData/cascade 源）→ 遍历 changes，折叠被修改单元格的子 Slot
 - `afterChange`（非 loadData 源）→ 读取 Hot 更新 `_raw`，若为 root 则同步 `S.root.$schema` 和 `S.root.data`，否则 `cascadeUp`
-- array 类型额外注册 `beforeRowMove`（清理子 Slot）+ `afterRowMove`（级联更新）
+- array / matrix 类型额外注册 `beforeRowMove`（清理子 Slot）+ `afterRowMove`（级联更新）
 
 ### readHot（从表格读取数据）
 
 Type-specific 解析逻辑：
 
 - **object** → 遍历列头，每列 `tryParse(cellValue)` 恢复到原始值
-- **array** → 过滤空行，`multi` 模式按 key 重建 object，否则 `tryParse` 每个元素
+- **matrix** → 过滤每行尾部空值，逐格 `tryParse`，过滤尾部空行
+- **array** → 过滤空行，multi-key 模式按 key 重建 object，否则 `tryParse` 每个元素
 - **其他** → `tryParse(data[0][0])`
 
 ### cellRenderer（单元格渲染器）
 
 自定义渲染器，在 `TextRenderer` 基础上叠加 `[+]`/`[-]` 按钮：
-- 超长内容（>80 字符）截断并设置 `td.title`
+- 超长内容（>40 字符）截断并设置 `td.title`（显示 `formatJSON` 结果）
 - 按钮绑定 `mousedown` 事件，调用 `expandCell` 或 `collapseCell`
 - 按钮状态由 `cellProperties._expanded` 控制
 
 ### createSlot（Slot 工厂）
 
 1. 从 `<template>` clone DOM
-2. 根据 options 设置属性（`_raw`, `_type`, `_parentRow`, `_parentCol`, `_parentHot`, `_isMultiCol`）
+2. 根据 options 设置属性（`_raw`, `_type`, `_path`, `_parentRow`, `_parentCol`, `_parentHot`）
 3. 根据类型设置按钮可见性
 4. 绑定按钮事件
 5. 按 `(parentRow, parentCol)` 排序插入父容器（保证数组子 Slot 按序号排列）
@@ -141,7 +150,7 @@ destroySlot(el):
 
 - TEXT 视图 → `_raw = _textTA.value`
 - RAW 视图 → `_raw = tryParse(_rawTA.value)`
-- TABLE 视图 → `_raw = readHot(_hot, _type, _isMultiCol)`
+- TABLE 视图 → `_raw = readHot(_hot, _type)`
 
 ---
 
@@ -151,4 +160,4 @@ destroySlot(el):
 var S = { root: { $schema: null, data: null } };
 ```
 
-无独立实例管理数组。所有 Hot 实例和 Slot 元数据直接挂在对应 DOM 元素上（`_hot`, `_raw`, `_type`, `_view` 等），通过 `findSlot(hot)` 向上遍历 DOM 树查找所属 Slot。
+所有 Hot 实例和 Slot 元数据直接挂在对应 DOM 元素上（`_hot`, `_raw`, `_type`, `_view` 等），通过 `findSlot(hot)` 向上遍历 DOM 树查找所属 Slot。

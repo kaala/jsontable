@@ -22,7 +22,7 @@
 | 框架 | 无，原生 JavaScript |
 | 表格 | Handsontable 14.6（jsDelivr CDN） |
 | 字体 | monospace 13px |
-| 代码 | 18 个函数，约 400 行，8 个章节 |
+| 代码 | 30 个函数，654 行，7 个代码段 |
 
 ## 文件
 
