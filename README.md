@@ -1,33 +1,34 @@
 # JSON Table Editor
 
-纯前端、单 HTML 文件的 JSON 可视化编辑器，以电子表格形式编辑嵌套 JSON 数据。
+A pure frontend, single-file JSON visual editor that edits nested JSON data as spreadsheets.
 
-## 快速开始
+## Quick Start
 
-直接用浏览器打开 `index.html`，无需安装、编译或构建。
+Open `index.html` in a browser. No install, no build, no dependencies.
 
-## 功能
+## Features
 
-- **表格编辑**：object 展开为单行多列表格，array 展开为多行表格，array-of-objects 自动合并 key 为多列表格
-- **三种视图**：TABLE（表格）/ TEXT（原始字符串）/ RAW（JSON 文本），各自独立 DOM，通过按钮切换
-- **无限嵌套**：单元格 `[+]` 展开子节点，`[-]` 收起，级联更新向上冒泡
-- **纯 JSON 文本**：所有单元格存储 JSON 文本（显示 = 值），复制粘贴直接通传
-- **数组操作**：行拖拽排序、自动追加空行
-- **零依赖构建**：仅 CDN 加载 Handsontable 14.6
+- **Spreadsheet editing**: objects become single-row multi-column tables, arrays become multi-row tables, arrays-of-objects auto-merge keys into multi-column tables, matrices become multi-row multi-column freeform grids
+- **Three views**: TABLE / TEXT / RAW, switchable per slot via buttons, independent DOM per view
+- **Infinite nesting**: `[+]` expands a cell into a child slot, `[-]` collapses, changes cascade upward
+- **Pure JSON text**: all cell values are JSON text strings (display = value), copy/paste passes through directly
+- **JSON Schema**: optional `$schema` column defines type constraints, auto-derived type annotations and dropdowns
+- **Array operations**: row drag-to-reorder, auto-spare rows/columns
+- **Zero-dependency**: only CDN-loaded Handsontable 14.6
 
-## 技术栈
+## Tech Stack
 
-| 项 | 说明 |
-|----|------|
-| 框架 | 无，原生 JavaScript |
-| 表格 | Handsontable 14.6（jsDelivr CDN） |
-| 字体 | monospace 13px |
-| 代码 | 30 个函数，654 行，7 个代码段 |
+| Item | Detail |
+|------|--------|
+| Framework | None, vanilla JavaScript |
+| Table | Handsontable 14.6 (jsDelivr CDN) |
+| Font | monospace 13px |
+| Code | 23 functions, 535 lines, 5 sections |
 
-## 文件
+## Files
 
-| 文件 | 说明 |
-|------|------|
-| `index.html` | 主程序 |
-| `SPEC.md` | 需求说明书 |
-| `PLAN.md` | 实现提纲 |
+| File | Description |
+|------|-------------|
+| `index.html` | Main program |
+| `SPEC.md` | Specification |
+| `PLAN.md` | Implementation outline |
