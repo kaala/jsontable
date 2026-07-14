@@ -84,7 +84,7 @@ function formatJSON(v) {
   return JSON.stringify(v);
 }
 
-function pathString(path) {
+function pathStr(path) {
   if (!path || !path.length) return '';
   var s = path[0];
   for (var i = 1; i < path.length; i++) {
@@ -138,7 +138,7 @@ function colDef(schema, val) {
   };
 }
 
-function describeColumns(schema, raw) {
+function tableColumns(schema, raw) {
   var type = typeOf(raw);
 
   if (type === 'obj') {
@@ -284,7 +284,7 @@ function createSlot(parent, opts) {
   if (opts.isRoot) el.classList.add('slot-root');
 
   el._path = opts.path || [];
-  el.querySelector('.slot-path').textContent = pathString(el._path);
+  el.querySelector('.slot-path').textContent = pathStr(el._path);
   el._raw  = opts.raw;
   el._type = opts.type;
   el._parentRow = opts.parentRow;
@@ -371,7 +371,7 @@ function buildHot(el) {
   var cfg, desc, itemDesc;
 
   if (type === 'obj') {
-    desc = describeColumns(getSchema(path), raw);
+    desc = tableColumns(getSchema(path), raw);
     cfg = { keys: desc.keys, hot: { data: [desc.keys.map(function(k) { return JSON.stringify(k in raw ? raw[k] : null); })], colHeaders: desc.headers, columns: desc.columns } };
   } else if (type === 'mat') {
     cfg = { keys: null, hot: { data: raw.map(function(r) { return r.map(function(c) { return JSON.stringify(c); }); }), colHeaders: true, rowHeaders: true, manualRowMove: true, minSpareRows: 2, minSpareCols: 3 } };
@@ -379,7 +379,7 @@ function buildHot(el) {
     if (raw.length === 0) {
       cfg = { keys: null, hot: { data: [['']], colHeaders: true, rowHeaders: true, manualRowMove: true, minSpareRows: 2 } };
     } else {
-      desc = describeColumns(getSchema(path), raw);
+      desc = tableColumns(getSchema(path), raw);
       itemDesc = desc.items;
       if (itemDesc) {
         cfg = { keys: itemDesc.keys, hot: { data: raw.map(function(it) { return itemDesc.keys.map(function(k) { return JSON.stringify(it && k in it ? it[k] : null); }); }), colHeaders: itemDesc.headers, rowHeaders: true, columns: itemDesc.columns, manualRowMove: true, minSpareRows: 2 } };
