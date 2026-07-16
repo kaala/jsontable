@@ -4,8 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>JSON TABLE EDITOR</title>
-  <script src="https://cdn.jsdelivr.net/npm/handsontable@14.6.0/dist/handsontable.full.min.js"></script>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/handsontable@14.6.0/dist/handsontable.full.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/handsontable@18.0.0/dist/handsontable.full.min.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/handsontable@18.0.0/styles/ht-theme-classic.min.css">
   <style>
     body { padding: 8px; font: 13px monospace; }
     .slot { margin: 8px; border-left: 1px solid #ddd; padding-left: 12px; }
@@ -202,6 +202,7 @@ function tableColumns(schema, raw) {
 function makeHot(div, cfg) {
   return new Handsontable(div, Object.assign({
     licenseKey: 'non-commercial-and-evaluation',
+    themeName: 'ht-theme-classic',
     editor: 'text',
     renderer: cellRenderer,
     width: 'auto', height: 'auto',
