@@ -18,7 +18,7 @@ Open `index.html` in a browser. No install, no build, no dependencies.
 - **Pure JSON text** — all cell values are JSON text strings (display = value), copy/paste passes through directly
 - **JSON Schema** — optional `$schema` column defines type constraints, auto-derived type annotations and dropdowns
 - **Array operations** — row drag-to-reorder, auto-spare rows/columns
-- **Zero-dependency** — only CDN-loaded Handsontable 14.6
+- **Zero-dependency** — only CDN-loaded Handsontable 18.0
 
 - **表格编辑** — obj 展开为单行多列表格，arr 展开为多行表格，arr-of-objs 自动合并 key 为多列表格，mat 展开为多行多列自由表格
 - **三种视图** — TABLE / TEXT / RAW，每个 Slot 通过按钮切换，各自独立 DOM
@@ -26,16 +26,16 @@ Open `index.html` in a browser. No install, no build, no dependencies.
 - **纯 JSON 文本** — 所有单元格存储 JSON 文本，复制粘贴直接通传
 - **JSON Schema** — 可选 `$schema` 列定义类型约束，自动推导类型标注与 dropdown
 - **数组操作** — 行拖拽排序、自动追加空行/空列
-- **零依赖** — 仅 CDN 加载 Handsontable 14.6
+- **零依赖** — 仅 CDN 加载 Handsontable 18.0
 
 ## Tech Stack / 技术栈
 
 | Item / 项 | Detail / 说明 |
 |-----------|---------------|
 | Framework / 框架 | None, vanilla JavaScript |
-| Table / 表格 | Handsontable 14.6 (jsDelivr CDN) |
+| Table / 表格 | Handsontable 18.0 (jsDelivr CDN) |
 | Font / 字体 | monospace 13px |
-| Code / 代码 | 23 functions, 535 lines, 5 sections |
+| Code / 代码 | 23 functions, 561 lines, 5 sections |
 
 ## Files / 文件
 

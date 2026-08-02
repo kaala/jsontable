@@ -113,12 +113,13 @@ switchView(el, 'table'):
    - primitive items → 单列，每行值 = `JSON.stringify(item)`
 4. **其他** → 单单元格，值 = `JSON.stringify(raw)`
 
-全局配置通过 `makeHot` 统一注入：`licenseKey`、`width: 'auto'`、`height: 'auto'`、`manualColumnResize: true`、`outsideClickDeselects: false`、`contextMenu: false`、`editor: 'text'`。
+全局配置通过 `makeHot` 统一注入：`licenseKey`、`width: 'auto'`、`height: 'auto'`、`manualColumnResize: true`、`outsideClickDeselects: false`、`contextMenu: false`、`editor: 'text'`。`.slot-hot` 容器 CSS `max-height: 360px; overflow: auto` 限制表格最大高度。
 
 Hot 钩子（全部使用闭包捕获的 `hot` 和 `el`，不用 `this`）：
 - `afterOnCellMouseDown` → 在 `[+]`/`[-]` 按钮上触发 `expandCell` / `collapseCell`
-- `beforeChange`（非 loadData/cascade 源）→ 遍历 changes，对被修改单元格调用 `destroySlot` 折叠子 Slot
-- `afterChange`（非 loadData 源）→ 读取 Hot 更新 `_raw`，若为 root 则同步 `S.root.$schema` 和 `S.root.data`，否则 `cascadeUp`
+- `afterBeginEditing` → str 类型单元格编辑时自动去掉 JSON 双引号
+- `beforeChange`（非 loadData/cascade 源）→ 遍历 changes，对被修改单元格调用 `destroySlot` 折叠子 Slot；同时自动处理 str 类型值的 JSON 双引号还原
+- `afterChange`（非 loadData 源）→ 读取 Hot 更新 `_raw`，若为 root 则同步 `S.root.$schema` 和 `S.root.data`，否则 `cascadeUp`；若 `source='edit'` 则通过 `setDataAtCell` 回写触发完整渲染
 - arr / mat 类型额外注册 `beforeRowMove`（清理子 Slot）+ `afterRowMove`（级联更新）
 
 ### readData（从表格读取数据）

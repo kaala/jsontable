@@ -4,7 +4,7 @@
 
 **目标**：纯前端、单 HTML 文件的 JSON 可视化编辑器，以电子表格形式编辑嵌套 JSON 数据。
 
-**交付形态**：单个 `.html` 文件，CDN 加载 Handsontable 14.6，零编译零构建，原生 JavaScript。
+**交付形态**：单个 `.html` 文件，CDN 加载 Handsontable 18.0，零编译零构建，原生 JavaScript。
 
 ---
 
@@ -14,7 +14,7 @@
 |------|------|
 | **框架** | 无框架，纯原生 JavaScript |
 | **构建** | 无编译、无打包 |
-| **表格库** | Handsontable 14.6（CDN，非商业许可） |
+| **表格库** | Handsontable 18.0（CDN，非商业许可） |
 | **字体** | `monospace`（13px） |
 | **主题** | Light 主题，极简 CSS |
 | **文件** | 单 HTML 文件自包含 |
@@ -66,7 +66,7 @@
 
 - **`[+]` 按钮**：解析单元格 JSON 字符串为原始值，创建子 Slot，若为 obj/arr/mat 则默认切换到 TABLE 视图，若为 str 则默认切换到 TEXT 视图，否则切换到 RAW 视图
 - **`[-]` 按钮**：销毁子 Slot 及其所有后代（`destroySlot` 内部自动调用 `saveSlot`），父单元格恢复折叠状态
-- **内联编辑**：双击进入 Handsontable 编辑器，编辑的是 JSON 字符串
+- **内联编辑**：双击进入 Handsontable 编辑器；str 类型单元格编辑时自动去掉 JSON 双引号，提交时自动加回
 - **超长文本**：>100 字符时截断显示前 35 字符 + `...`，hover 显示完整格式化内容
 
 ### 4.3 复制/粘贴
@@ -80,8 +80,9 @@
 
 ### 4.5 子 Slot 自动管理
 
-- **`beforeChange`**：当父单元格被编辑、删除、粘贴时，自动折叠（`destroySlot`）其展开的子 Slot
+- **`beforeChange`**：当父单元格被编辑、删除、粘贴时，自动折叠（`destroySlot`）其展开的子 Slot；同时自动处理 str 类型值的 JSON 双引号还原
 - **`beforeRowMove`**：数组行拖拽前，先清除所有子 Slot（`clearChildren`），重排后通过 `afterRowMove` 级联更新父单元格
+- **`afterChange(source=edit)`**：内联编辑提交后通过 `setDataAtCell` 回写，触发完整渲染管线确保按钮与截断正确显示
 
 ### 4.6 类型系统
 
