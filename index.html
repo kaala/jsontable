@@ -15,6 +15,7 @@
     .slot-txt { width: 600px; height: 200px; font: 13px monospace; resize: both; overflow-x: auto; white-space: pre; }
     .btn { cursor: pointer; padding: 0 4px; background: #eee; font: 13px monospace; user-select: none; }
     .btn.active { background: #00f; color: #fff; }
+    .slot-hot { max-height: 360px; overflow: auto; }
     .handsontable td { white-space: nowrap; font: 13px monospace; line-height: 21px; }
     .cell-txt { padding-right: 16px; }
     .cell-btn { float: right; position: relative; line-height: 21px; z-index: 10; }
@@ -407,15 +408,38 @@ function buildHot(el) {
       expandCell(hot, coords.row, coords.col);
     }
   });
+  hot.addHook('afterBeginEditing', function (row, col) {
+    var value = hot.getDataAtCell(row, col);
+    if (typeof value === 'string') {
+      var parsed = tryParse(value);
+      if (typeof parsed === 'string' && parsed !== value) {
+        hot.getActiveEditor().setValue(parsed);
+      }
+    }
+  });
   hot.addHook('beforeChange', function (changes, source) {
     if (source === 'loadData' || source === 'cascade') return;
     changes.forEach(function (ch) {
       var meta = hot.getCellMeta(ch[0], ch[1]);
       if (meta._slot) { destroySlot(meta._slot); }
+      if (ch[3] != null && typeof tryParse(ch[2]) === 'string') {
+        try {
+          var newParsed = JSON.parse(ch[3]);
+          if (typeof newParsed !== 'string') ch[3] = JSON.stringify(ch[3]);
+        } catch(e) {
+          ch[3] = JSON.stringify(ch[3]);
+        }
+      }
     });
   });
   hot.addHook('afterChange', function (changes, source) {
     if (source === 'loadData') return;
+    if (source === 'edit') {
+      changes.forEach(function (ch) {
+        hot.setDataAtCell(ch[0], ch[1], JSON.stringify(tryParse(ch[3])), 'cascade');
+      });
+      return;
+    }
     el._raw = readData(el._hot, el._type, el._keys);
     if (el.classList.contains('slot-root')) {
       S.root.$schema = el._raw.$schema;
