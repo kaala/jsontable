@@ -209,6 +209,7 @@ function makeHot(div, cfg) {
     width: 'auto', height: 'auto',
     wordWarp: false,
     manualColumnResize: true,
+    imeFastEdit: true,
     outsideClickDeselects: false, contextMenu: false,
   }, cfg));
 }
@@ -254,7 +255,7 @@ function readData(hot, type, keys) {
 
   if (type === 'arr') {
     var rows = data.filter(function (r) {
-      return r.some(function (c) { return c != null && c !== ''; });
+      return r.some(function (c) { return c != null && c !== '' && tryParse(c) != null; });
     });
     if (keys && keys.length > 0) {
       return rows.map(function (r) {
@@ -410,12 +411,14 @@ function buildHot(el) {
   });
   hot.addHook('afterBeginEditing', function (row, col) {
     var value = hot.getDataAtCell(row, col);
-    if (typeof value === 'string') {
+    var editor = hot.getActiveEditor();
+    if (typeof value === 'string' && editor) {
       var parsed = tryParse(value);
       if (typeof parsed === 'string' && parsed !== value) {
-        hot.getActiveEditor().setValue(parsed);
+        editor.setValue(parsed);
       }
     }
+    if (editor) editor.select();
   });
   hot.addHook('beforeChange', function (changes, source) {
     if (source === 'loadData' || source === 'cascade') return;
