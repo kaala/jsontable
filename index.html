@@ -409,7 +409,7 @@ function buildHot(el) {
       expandCell(hot, coords.row, coords.col);
     }
   });
-  hot.addHook('afterBeginEditing', function (row, col) {
+  hot.addHook('beforeBeginEditing', function (row, col) {
     var value = hot.getDataAtCell(row, col);
     var editor = hot.getActiveEditor();
     if (typeof value === 'string' && editor) {
@@ -418,7 +418,6 @@ function buildHot(el) {
         editor.setValue(parsed);
       }
     }
-    if (editor) editor.select();
   });
   hot.addHook('beforeChange', function (changes, source) {
     if (source === 'loadData' || source === 'cascade') return;
@@ -557,6 +556,62 @@ function init() {
   });
   switchView(root, 'table');
 }
+
+// ============================================================
+// 6. Shortcuts (Ctrl+O / Ctrl+S)
+// ============================================================
+function handleGlobalKeydown(e) {
+  var isMac = e.metaKey && !e.ctrlKey;
+  var ctrl = e.ctrlKey || isMac;
+
+  if (ctrl && e.key.toLowerCase() === 'o') {
+    e.preventDefault();
+    var input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json,application/json';
+    input.onchange = function () {
+      var file = input.files[0];
+      if (!file) return;
+      var reader = new FileReader();
+      reader.onload = function (ev) {
+        try {
+          var json = JSON.parse(ev.target.result);
+          S.root.data = json;
+          var rootEl = document.querySelector('.slot-root');
+          if (rootEl) {
+            rootEl._raw.data = json;
+            if (rootEl._view === 'table' && rootEl._hot) {
+              rootEl._hot.setDataAtCell(0, 1, JSON.stringify(json), 'cascade');
+            } else if (rootEl._view === 'raw') {
+              rootEl._rawTA.value = formatJSON(rootEl._raw);
+            }
+          }
+        } catch (err) {
+          alert('Invalid JSON: ' + err.message);
+        }
+      };
+      reader.readAsText(file);
+    };
+    input.click();
+  }
+
+  if (ctrl && e.key.toLowerCase() === 's') {
+    e.preventDefault();
+    var data = S.root.data;
+    var text = (data != null && (typeOf(data) === 'obj' || typeOf(data) === 'arr' || typeOf(data) === 'mat'))
+      ? formatJSON(data)
+      : JSON.stringify(data);
+    var blob = new Blob([text], { type: 'application/json' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = 'data.json';
+    a.click();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 100);
+  }
+}
+
+document.addEventListener('keydown', handleGlobalKeydown);
 
 document.addEventListener('DOMContentLoaded', init);
 </script>
