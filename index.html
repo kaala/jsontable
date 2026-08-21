@@ -15,10 +15,10 @@
     .slot-txt { width: 600px; height: 200px; font: 13px monospace; resize: both; overflow-x: auto; white-space: pre; }
     .btn { cursor: pointer; padding: 0 4px; background: #eee; font: 13px monospace; user-select: none; }
     .btn.active { background: #00f; color: #fff; }
-    .slot-hot { max-height: 360px; overflow: auto; }
-    .handsontable td { white-space: nowrap; font: 13px monospace; line-height: 21px; }
-    .cell-txt { padding-right: 16px; }
-    .cell-btn { float: right; position: relative; line-height: 21px; z-index: 10; }
+    /* .slot-hot { max-height: 360px; overflow: auto; } */
+    .handsontable td { overflow: hidden; font: 13px monospace; line-height: 21px; position: relative; }
+    .cell-txt { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .cell-btn { position: absolute; right: 4px; top: 0; line-height: 21px; z-index: 10; }
   </style>
 </head>
 <body>
@@ -71,6 +71,7 @@ function typeOf(v) {
 function formatJSON(v) {
   var t = typeOf(v);
   var lines;
+  if (t === 'str') return v;
   if (t === 'obj') {
     var keys = Object.keys(v);
     if (keys.length === 0) return '{}';
@@ -219,12 +220,7 @@ function cellRenderer(hot, td, row, col, prop, value, cellProperties) {
   if (value == null || value === '') { td.innerHTML = ''; return; }
   var expanded = !!cellProperties._expanded;
   var display = value;
-  var title = '';
-  if (value.length > 100) {
-    display = value.slice(0, 35) + '...';
-    title = formatJSON(tryParse(value));
-  }
-  td.title = title;
+  td.title = formatJSON(tryParse(value));
   if (expanded) {
     td.innerHTML = `<span class="btn cell-btn active">[-]</span><span class="cell-txt">${esc(display)}</span>`;
   } else {
@@ -398,6 +394,19 @@ function buildHot(el) {
   el._keys = cfg.keys;
   var hot = makeHot(el._hotDiv, cfg.hot);
 
+  hot.addHook('afterRender', function () {
+    var settings = hot.getSettings();
+    if (settings.colWidths) return;
+    var colCount = hot.countCols();
+    if (!colCount) return;
+    var widths = [];
+    for (var col = 0; col < colCount; col++) {
+      var w = hot.getColWidth(col);
+      widths.push(w > 500 ? 500 : (w < 100 ? 100 : w));
+    }
+    hot.updateSettings({ colWidths: widths });
+  });
+
   hot.addHook('afterOnCellMouseDown', function (event, coords, td) {
     if (!event.target.classList.contains('cell-btn')) return;
     event.stopPropagation();
@@ -547,14 +556,19 @@ function collapseCell(hot, row, col) {
 // ============================================================
 var S = {};
 
-function init() {
-  S.root = { $schema: null, data: null };
+function createRoot(raw) {
   var root = createSlot(null, {
     isRoot: true, path: ['$'],
-    raw: S.root, type: 'obj',
+    raw: raw, type: 'obj',
     showTable: true, noCollapse: true
   });
   switchView(root, 'table');
+  return root;
+}
+
+function init() {
+  S.root = { $schema: null, data: null };
+  createRoot(S.root);
 }
 
 // ============================================================
@@ -576,16 +590,17 @@ function handleGlobalKeydown(e) {
       reader.onload = function (ev) {
         try {
           var json = JSON.parse(ev.target.result);
-          S.root.data = json;
           var rootEl = document.querySelector('.slot-root');
           if (rootEl) {
-            rootEl._raw.data = json;
-            if (rootEl._view === 'table' && rootEl._hot) {
-              rootEl._hot.setDataAtCell(0, 1, JSON.stringify(json), 'cascade');
-            } else if (rootEl._view === 'raw') {
-              rootEl._rawTA.value = formatJSON(rootEl._raw);
+            clearChildren(rootEl);
+            if (rootEl._hot) {
+              rootEl._hot.destroy();
+              rootEl._hot = null;
             }
+            rootEl.remove();
           }
+          S.root = { $schema: null, data: json };
+          createRoot(S.root);
         } catch (err) {
           alert('Invalid JSON: ' + err.message);
         }
