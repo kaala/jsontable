@@ -1,4 +1,4 @@
-# 实现提纲
+# JSON Table Editor — 实现提纲
 
 ## 文件结构
 
@@ -10,7 +10,7 @@
 | 2. Schema | 列配置推导 | `getSchema`, `colDef`, `tableColumns` |
 | 3. Hot | 表格工厂与渲染器 | `makeHot`, `cellRenderer`, `readData` |
 | 4. Slot | Slot 生命周期、DOM、视图、数据读写、单元格展开/折叠 | `findSlot`, `createSlot`, `switchView`, `buildHot`, `saveSlot`, `cascadeUp`, `destroySlot`, `clearChildren`, `cellPath`, `expandCell`, `collapseCell` |
-| 5. Init | 全局状态与初始化 | `init`（+ `S` 全局对象） |
+| 5. Init | 全局状态与初始化 | `createRoot`, `init`, `handleGlobalKeydown` |
 
 ---
 
@@ -24,18 +24,18 @@
   <template id="slot-template">
     <div class="slot">
       <div class="slot-head">
-        <span class="slot-path"></span>        <!-- 路径显示，如 $.data.items[0].name -->
-        <span class="btn slot-btn-table">TABLE</span>
-        <span class="btn slot-btn-text">TEXT</span>
-        <span class="btn slot-btn-raw">RAW</span>
-        <span class="btn slot-btn-collapse">[-]</span>
+        <span class="slot-path"></span>
+        <span class="btn btn-table">TABLE</span>
+        <span class="btn btn-text">TEXT</span>
+        <span class="btn btn-raw">RAW</span>
+        <span class="btn btn-collapse">[-]</span>
       </div>
       <div class="slot-body">
-        <div class="slot-hot"></div>            <!-- Handsontable 容器 -->
-        <textarea class="slot-txt slot-txt-text"></textarea>   <!-- TEXT 视图 -->
-        <textarea class="slot-txt slot-txt-raw"></textarea>    <!-- RAW 视图 -->
+        <div class="slot-hot"></div>
+        <textarea class="slot-txt slot-txt-text"></textarea>
+        <textarea class="slot-txt slot-txt-raw"></textarea>
       </div>
-      <div class="slot-children"></div>          <!-- 子 Slot 插入此处 -->
+      <div class="slot-children"></div>
     </div>
   </template>
 </body>
@@ -113,18 +113,19 @@ switchView(el, 'table'):
    - primitive items → 单列，每行值 = `JSON.stringify(item)`
 4. **其他** → 单单元格，值 = `JSON.stringify(raw)`
 
-全局配置通过 `makeHot` 统一注入：`licenseKey`、`width: 'auto'`、`height: 'auto'`、`manualColumnResize: true`、`outsideClickDeselects: false`、`contextMenu: false`、`editor: 'text'`。`.slot-hot` 容器 CSS `max-height: 360px; overflow: auto` 限制表格最大高度。
+全局配置通过 `makeHot` 统一注入：`licenseKey`、`width: 'auto'`、`height: 'auto'`、`manualColumnResize: true`、`wordWrap: false`、`outsideClickDeselects: false`、`contextMenu: false`、`editor: 'text'`。
 
 Hot 钩子（全部使用闭包捕获的 `hot` 和 `el`，不用 `this`）：
 - `afterOnCellMouseDown` → 在 `[+]`/`[-]` 按钮上触发 `expandCell` / `collapseCell`
-- `afterBeginEditing` → str 类型单元格编辑时自动去掉 JSON 双引号
+- `beforeBeginEditing` → str 类型单元格编辑时自动去掉 JSON 双引号
 - `beforeChange`（非 loadData/cascade 源）→ 遍历 changes，对被修改单元格调用 `destroySlot` 折叠子 Slot；同时自动处理 str 类型值的 JSON 双引号还原
 - `afterChange`（非 loadData 源）→ 读取 Hot 更新 `_raw`，若为 root 则同步 `S.root.$schema` 和 `S.root.data`，否则 `cascadeUp`；若 `source='edit'` 则通过 `setDataAtCell` 回写触发完整渲染
+- `afterRender`（首次渲染）→ 若未配置 `colWidths`，则读取各列实际宽度，裁剪到 `[100, 500]` 区间，单次 `updateSettings` 刷入
 - arr / mat 类型额外注册 `beforeRowMove`（清理子 Slot）+ `afterRowMove`（级联更新）
 
 ### readData（从表格读取数据）
 
-以前是 `readHot`（包装 `readData`），现合并为一个函数，直接接收 `(hot, type, keys)`：
+直接接收 `(hot, type, keys)`：
 
 - **obj** → 遍历列头，每列 `tryParse(cellValue)` 恢复到原始值
 - **mat** → 过滤每行尾部空值，逐格 `tryParse`，过滤尾部空行
@@ -134,7 +135,7 @@ Hot 钩子（全部使用闭包捕获的 `hot` 和 `el`，不用 `this`）：
 ### cellRenderer（单元格渲染器）
 
 自定义渲染器，在 `TextRenderer` 基础上叠加 `[+]`/`[-]` 按钮：
-- 超长内容（>100 字符）截断为前 35 字符 + `...`，并设置 `td.title`（显示 `formatJSON` 结果）
+- 单元格内容由 CSS `text-overflow: ellipsis` 自动截断，hover `td.title` 显示 `formatJSON(value)` 格式化内容
 - 按钮状态由 `cellProperties._expanded` 控制
 
 ### createSlot（Slot 工厂）

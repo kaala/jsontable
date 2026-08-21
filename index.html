@@ -15,10 +15,9 @@
     .slot-txt { width: 600px; height: 200px; font: 13px monospace; resize: both; overflow-x: auto; white-space: pre; }
     .btn { cursor: pointer; padding: 0 4px; background: #eee; font: 13px monospace; user-select: none; }
     .btn.active { background: #00f; color: #fff; }
-    /* .slot-hot { max-height: 360px; overflow: auto; } */
     .handsontable td { overflow: hidden; font: 13px monospace; line-height: 21px; position: relative; }
     .cell-txt { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .cell-btn { position: absolute; right: 4px; top: 0; line-height: 21px; z-index: 10; }
+    .cell-btn { position: absolute; right: 4px; line-height: 21px; z-index: 10; }
   </style>
 </head>
 <body>
@@ -208,7 +207,7 @@ function makeHot(div, cfg) {
     editor: 'text',
     renderer: cellRenderer,
     width: 'auto', height: 'auto',
-    wordWarp: false,
+    wordWrap: false,
     manualColumnResize: true,
     imeFastEdit: true,
     outsideClickDeselects: false, contextMenu: false,
@@ -220,7 +219,7 @@ function cellRenderer(hot, td, row, col, prop, value, cellProperties) {
   if (value == null || value === '') { td.innerHTML = ''; return; }
   var expanded = !!cellProperties._expanded;
   var display = value;
-  td.title = formatJSON(tryParse(value));
+  td.title = formatJSON(value);
   if (expanded) {
     td.innerHTML = `<span class="btn cell-btn active">[-]</span><span class="cell-txt">${esc(display)}</span>`;
   } else {
