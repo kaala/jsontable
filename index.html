@@ -16,7 +16,7 @@
     .btn { cursor: pointer; padding: 0 4px; background: #eee; font: 13px monospace; user-select: none; }
     .btn.active { background: #00f; color: #fff; }
     .handsontable td { overflow: hidden; font: 13px monospace; line-height: 21px; position: relative; }
-    .cell-txt { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .cell-txt { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 32px; }
     .cell-btn { position: absolute; right: 4px; line-height: 21px; z-index: 10; }
   </style>
 </head>
@@ -598,7 +598,7 @@ function handleGlobalKeydown(e) {
             }
             rootEl.remove();
           }
-          S.root = { $schema: null, data: json };
+          S.root = json;
           createRoot(S.root);
         } catch (err) {
           alert('Invalid JSON: ' + err.message);
@@ -611,7 +611,7 @@ function handleGlobalKeydown(e) {
 
   if (ctrl && e.key.toLowerCase() === 's') {
     e.preventDefault();
-    var data = S.root.data;
+    var data = S.root;
     var text = (data != null && (typeOf(data) === 'obj' || typeOf(data) === 'arr' || typeOf(data) === 'mat'))
       ? formatJSON(data)
       : JSON.stringify(data);
