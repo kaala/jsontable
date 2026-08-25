@@ -18,6 +18,8 @@
     .handsontable td { overflow: hidden; font: 13px monospace; line-height: 21px; position: relative; }
     .cell-txt { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 32px; }
     .cell-btn { position: absolute; right: 4px; line-height: 21px; z-index: 10; }
+    .toast { position: fixed; top: 16px; right: 16px; max-width: 400px; padding: 8px 16px; background: #fff; color: #333; font: 13px monospace; border: 1px solid #ddd; border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.15); z-index: 10000; opacity: 0; transition: opacity 0.3s; pointer-events: none; }
+    .toast.show { opacity: 0.9; }
   </style>
 </head>
 <body>
@@ -41,7 +43,19 @@
 </template>
 <script>
 // ============================================================
-// 1. Utils
+// 0. Toast
+// ============================================================
+function postmsg(msg) {
+  var toast = document.createElement('div');
+  toast.className = 'toast';
+  toast.textContent = msg;
+  document.body.appendChild(toast);
+  requestAnimationFrame(function () { toast.classList.add('show'); });
+  setTimeout(function () {
+    toast.classList.remove('show');
+    setTimeout(function () { if (toast.parentNode) toast.parentNode.removeChild(toast); }, 300);
+  }, 5000);
+}
 // ============================================================
 function tryParse(s) {
   try { return JSON.parse(s); } catch (e) { return s; }
@@ -101,11 +115,16 @@ function pathStr(path) {
 // 2. Schema
 // ============================================================
 function getSchema(path) {
-  var schema = S.root.$schema;
+  var root = S.root;
+  var schema = null;
+  if (root && typeof root === 'object' && !Array.isArray(root) && root.$schema) {
+    schema = root.$schema;
+  }
+  if (!schema && S.root.$schema) schema = S.root.$schema;
   if (!schema || typeof schema !== 'object') return null;
   if (path[0] !== '$' || path.length < 2) return null;
   if (path[1] === '$schema') return null;
-  for (var i = 2; i < path.length; i++) {
+  for (var i = 1; i < path.length; i++) {
     var seg = path[i];
     if (typeof seg === 'number') {
       if (schema.type !== 'array' || !schema.items) return null;
@@ -452,8 +471,7 @@ function buildHot(el) {
     }
     el._raw = readData(el._hot, el._type, el._keys);
     if (el.classList.contains('slot-root')) {
-      S.root.$schema = el._raw.$schema;
-      S.root.data = el._raw.data;
+      S.root = el._raw;
     } else {
       cascadeUp(el);
     }
@@ -553,21 +571,54 @@ function collapseCell(hot, row, col) {
 // ============================================================
 // 5. Init
 // ============================================================
+function getQueryParam(name) {
+  var query = window.location.search.substring(1);
+  var pairs = query.split('&');
+  for (var i = 0; i < pairs.length; i++) {
+    var pair = pairs[i].split('=');
+    if (decodeURIComponent(pair[0]) === name) {
+      return decodeURIComponent(pair[1] || '');
+    }
+  }
+  return null;
+}
+
 var S = {};
 
 function createRoot(raw) {
+  var type = typeOf(raw);
+  var hasTable = type === 'obj' || type === 'arr' || type === 'mat';
   var root = createSlot(null, {
     isRoot: true, path: ['$'],
-    raw: raw, type: 'obj',
-    showTable: true, noCollapse: true
+    raw: raw, type: type,
+    showTable: hasTable, noCollapse: true
   });
-  switchView(root, 'table');
+  if (hasTable) switchView(root, 'table');
+  else if (type === 'str') switchView(root, 'text');
+  else switchView(root, 'raw');
   return root;
 }
 
 function init() {
-  S.root = { $schema: null, data: null };
-  createRoot(S.root);
+  var path = getQueryParam('path');
+  if (path) {
+    S.sourceUrl = path;
+    fetch(path)
+      .then(function (res) { return res.json(); })
+      .then(function (json) {
+        S.root = json;
+        createRoot(S.root);
+      })
+      .catch(function (err) {
+        postmsg('Failed to load JSON from URL: ' + err.message);
+        S.root = { $schema: null, data: null };
+        createRoot(S.root);
+      });
+  } else {
+    S.sourceUrl = null;
+    S.root = { $schema: null, data: null };
+    createRoot(S.root);
+  }
 }
 
 // ============================================================
@@ -601,7 +652,7 @@ function handleGlobalKeydown(e) {
           S.root = json;
           createRoot(S.root);
         } catch (err) {
-          alert('Invalid JSON: ' + err.message);
+          postmsg('Invalid JSON: ' + err.message);
         }
       };
       reader.readAsText(file);
@@ -615,13 +666,28 @@ function handleGlobalKeydown(e) {
     var text = (data != null && (typeOf(data) === 'obj' || typeOf(data) === 'arr' || typeOf(data) === 'mat'))
       ? formatJSON(data)
       : JSON.stringify(data);
-    var blob = new Blob([text], { type: 'application/json' });
-    var url = URL.createObjectURL(blob);
-    var a = document.createElement('a');
-    a.href = url;
-    a.download = 'data.json';
-    a.click();
-    setTimeout(function () { URL.revokeObjectURL(url); }, 100);
+    if (S.sourceUrl) {
+      fetch(S.sourceUrl, {
+        method: 'PUT',
+        body: text,
+        headers: { 'Content-Type': 'application/json' }
+      })
+      .then(function (res) {
+        if (res.ok) postmsg('Saved to ' + S.sourceUrl);
+        else postmsg('Save failed: HTTP ' + res.status);
+      })
+      .catch(function (err) {
+        postmsg('Save failed: ' + err.message);
+      });
+    } else {
+      var blob = new Blob([text], { type: 'application/json' });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = 'data.json';
+      a.click();
+      setTimeout(function () { URL.revokeObjectURL(url); }, 100);
+    }
   }
 }
 
