@@ -18,6 +18,8 @@ Open `index.html` in a browser. No install, no build, no dependencies.
 - **Pure JSON text** — all cell values are JSON text strings (display = value), copy/paste passes through directly
 - **JSON Schema** — optional `$schema` column defines type constraints, auto-derived type annotations and dropdowns
 - **Array operations** — row drag-to-reorder, auto-spare rows/columns, auto column-width clamping [100, 500]
+- **Fixed first column** — the leftmost column of every TABLE view stays locked while scrolling
+- **Toast notifications** — top-center positioned, border-only style with three color modes: black (default), green (success), red (error)
 - **Shortcuts** — Ctrl+O to open a JSON file, Ctrl+S to download the current data
 - **Zero-dependency** — only CDN-loaded Handsontable 18.0
 
@@ -27,6 +29,8 @@ Open `index.html` in a browser. No install, no build, no dependencies.
 - **纯 JSON 文本** — 所有单元格存储 JSON 文本，复制粘贴直接通传
 - **JSON Schema** — 可选 `$schema` 列定义类型约束，自动推导类型标注与 dropdown
 - **数组操作** — 行拖拽排序、自动追加空行/空列、列宽自动裁剪 [100, 500]
+- **第一列固定** — 所有 TABLE 视图首列滚动时保持冻结
+- **通知提示** — 顶部居中显示，极简边框样式，三种颜色：黑色（默认）、绿色（成功）、红色（失败）
 - **快捷键** — Ctrl+O 打开 JSON 文件，Ctrl+S 下载当前数据
 - **零依赖** — 仅 CDN 加载 Handsontable 18.0
 

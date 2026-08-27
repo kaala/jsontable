@@ -55,11 +55,11 @@
 
 | JSON 类型 | 表格形态 | 配置 |
 |-----------|---------|------|
-| **obj** | 单行，属性名为列头（带类型标注） | `colHeaders: keys` |
-| **mat**（元素均为 arr 的 arr） | 多行多列表格 | 行列表头，`minSpareRows: 2`，`minSpareCols: 3`，行拖拽 |
-| **arr（元素均为 obj）** | 多列，合并所有对象的 key 为列头 | 行表头，`minSpareRows: 2`，行拖拽 |
-| **arr（其他）** | 单列，行表头 | `minSpareRows: 2`，行拖拽 |
-| **原始类型** | 单单元格 | 无行/列表头 |
+| **obj** | 单行，属性名为列头（带类型标注） | `colHeaders: keys`，`fixedColumnsLeft: 1` |
+| **mat**（元素均为 arr 的 arr） | 多行多列表格 | 行列表头，`minSpareRows: 2`，`minSpareCols: 3`，行拖拽，`fixedColumnsLeft: 1` |
+| **arr（元素均为 obj）** | 多列，合并所有对象的 key 为列头 | 行表头，`minSpareRows: 2`，行拖拽，`fixedColumnsLeft: 1` |
+| **arr（其他）** | 单列，行表头 | `minSpareRows: 2`，行拖拽，`fixedColumnsLeft: 1` |
+| **原始类型** | 单单元格 | 无行/列表头，无固定列 |
 
 ### 4.2 单元格操作
 
@@ -121,3 +121,21 @@ S = {
 - `_view` — 当前激活视图
 - `_parentRow` / `_parentCol` / `_parentHot` — 父表格引用，用于级联更新和 DOM 排序
 - `_path` — 路径数组，根为 `['$']`
+
+---
+
+## 6. 通知提示（Toast）
+
+| 属性 | 说明 |
+|------|------|
+| **位置** | 顶部居中，`top: 16px; left: 50%; transform: translateX(-50%)` |
+| **样式** | 极简，仅边框，无圆角、无阴影、无动画 |
+| **颜色** | 默认黑（`toast`）、成功绿（`toast-success`）、失败红（`toast-error`），均使用 `#hhh` 简写色值 |
+| **生命周期** | 显示 5 秒后自动移除 DOM |
+| **调用** | `postmsg(message)` 默认黑；`postmsg(message, 'success')` 绿色；`postmsg(message, 'error')` 红色 |
+
+### 使用场景
+
+- **成功（绿色）**：保存成功等正向反馈 — `postmsg('Saved to url', 'success')`
+- **失败（红色）**：加载失败、JSON 无效、保存失败等错误 — `postmsg('Failed: msg', 'error')`
+- **默认（黑色）**：一般提示，当前暂无使用
