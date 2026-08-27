@@ -7,7 +7,7 @@
   <script src="https://cdn.jsdelivr.net/npm/handsontable@18.0.0/dist/handsontable.full.min.js"></script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/handsontable@18.0.0/styles/ht-theme-classic.min.css">
   <style>
-    body { padding: 8px; font: 13px monospace; }
+    body { padding: 8px; padding-bottom: 600px; font: 13px monospace; }
     .slot { margin: 0; border-left: 1px solid #ddd; padding-left: 12px; }
     .slot-root { border-left: 0; padding-left: 0; }
     .slot-head { margin: 4px; }
@@ -18,8 +18,9 @@
     .handsontable td { overflow: hidden; font: 13px monospace; line-height: 21px; position: relative; }
     .cell-txt { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 32px; }
     .cell-btn { position: absolute; right: 4px; line-height: 21px; z-index: 10; }
-    .toast { position: fixed; top: 16px; right: 16px; max-width: 400px; padding: 8px 16px; background: #fff; color: #333; font: 13px monospace; border: 1px solid #ddd; border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.15); z-index: 10000; opacity: 0; transition: opacity 0.3s; pointer-events: none; }
-    .toast.show { opacity: 0.9; }
+    .toast { position: fixed; top: 16px; left: 50%; transform: translateX(-50%); max-width: 400px; padding: 8px 16px; font: 13px monospace; border: 1px solid; z-index: 10000; background: #fff; color: #000; border-color: #000; }
+    .toast-success { background: #efe; color: #0a0; border-color: #0a0; }
+    .toast-error { background: #fee; color: #c00; border-color: #c00; }
   </style>
 </head>
 <body>
@@ -45,15 +46,13 @@
 // ============================================================
 // 0. Toast
 // ============================================================
-function postmsg(msg) {
+function postmsg(msg, type) {
   var toast = document.createElement('div');
-  toast.className = 'toast';
+  toast.className = 'toast' + (type ? ' toast-' + type : '');
   toast.textContent = msg;
   document.body.appendChild(toast);
-  requestAnimationFrame(function () { toast.classList.add('show'); });
   setTimeout(function () {
-    toast.classList.remove('show');
-    setTimeout(function () { if (toast.parentNode) toast.parentNode.removeChild(toast); }, 300);
+    if (toast.parentNode) toast.parentNode.removeChild(toast);
   }, 5000);
 }
 // ============================================================
@@ -230,6 +229,7 @@ function makeHot(div, cfg) {
     manualColumnResize: true,
     imeFastEdit: true,
     outsideClickDeselects: false, contextMenu: false,
+    fixedColumnsLeft: 1,
   }, cfg));
 }
 
@@ -238,7 +238,7 @@ function cellRenderer(hot, td, row, col, prop, value, cellProperties) {
   if (value == null || value === '') { td.innerHTML = ''; return; }
   var expanded = !!cellProperties._expanded;
   var display = value;
-  td.title = formatJSON(value);
+  td.title = formatJSON(tryParse(value));
   if (expanded) {
     td.innerHTML = `<span class="btn cell-btn active">[-]</span><span class="cell-txt">${esc(display)}</span>`;
   } else {
@@ -420,7 +420,7 @@ function buildHot(el) {
     var widths = [];
     for (var col = 0; col < colCount; col++) {
       var w = hot.getColWidth(col);
-      widths.push(w > 500 ? 500 : (w < 100 ? 100 : w));
+      widths.push(w > 320 ? 320 : (w < 100 ? 100 : w));
     }
     hot.updateSettings({ colWidths: widths });
   });
@@ -586,6 +586,7 @@ function getQueryParam(name) {
 var S = {};
 
 function createRoot(raw) {
+  window.scrollTo(0, 0);
   var type = typeOf(raw);
   var hasTable = type === 'obj' || type === 'arr' || type === 'mat';
   var root = createSlot(null, {
@@ -610,7 +611,7 @@ function init() {
         createRoot(S.root);
       })
       .catch(function (err) {
-        postmsg('Failed to load JSON from URL: ' + err.message);
+        postmsg('Failed to load JSON from URL: ' + err.message, 'error');
         S.root = { $schema: null, data: null };
         createRoot(S.root);
       });
@@ -652,7 +653,7 @@ function handleGlobalKeydown(e) {
           S.root = json;
           createRoot(S.root);
         } catch (err) {
-          postmsg('Invalid JSON: ' + err.message);
+          postmsg('Invalid JSON: ' + err.message, 'error');
         }
       };
       reader.readAsText(file);
@@ -673,11 +674,11 @@ function handleGlobalKeydown(e) {
         headers: { 'Content-Type': 'application/json' }
       })
       .then(function (res) {
-        if (res.ok) postmsg('Saved to ' + S.sourceUrl);
-        else postmsg('Save failed: HTTP ' + res.status);
+        if (res.ok) postmsg('Saved to ' + S.sourceUrl, 'success');
+        else postmsg('Save failed: HTTP ' + res.status, 'error');
       })
       .catch(function (err) {
-        postmsg('Save failed: ' + err.message);
+        postmsg('Save failed: ' + err.message, 'error');
       });
     } else {
       var blob = new Blob([text], { type: 'application/json' });
