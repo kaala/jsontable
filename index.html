@@ -18,6 +18,9 @@
     .handsontable td { overflow: hidden; font: 13px monospace; line-height: 21px; position: relative; }
     .cell-txt { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 32px; }
     .cell-btn { position: absolute; right: 4px; line-height: 21px; z-index: 10; }
+    .cell-txt[data-tooltip] { anchor-name: --cell-tooltip; anchor-scope: --cell-tooltip; }
+    .cell-txt[data-tooltip]::after { content: attr(data-tooltip); display: none; position: fixed; position-anchor: --cell-tooltip; left: anchor(left); top: calc(anchor(bottom) + 8px); z-index: 1000; padding: 4px 8px; font: 12px monospace; line-height: 1.4; white-space: pre; overflow-wrap: anywhere; background: #fff; color: #000; border: 1px solid #000; }
+    .cell-txt[data-tooltip]:hover::after { display: block; }
     .toast { position: fixed; top: 16px; left: 50%; transform: translateX(-50%); max-width: 400px; padding: 8px 16px; font: 13px monospace; border: 1px solid; z-index: 10000; background: #fff; color: #000; border-color: #000; }
     .toast-success { background: #efe; color: #0a0; border-color: #0a0; }
     .toast-error { background: #fee; color: #c00; border-color: #c00; }
@@ -88,12 +91,12 @@ function formatJSON(v) {
     var keys = Object.keys(v);
     if (keys.length === 0) return '{}';
     lines = keys.map(function (k) { return `${JSON.stringify(k)}: ${JSON.stringify(v[k])}`; });
-    return `{\n${lines.join(',\n')}\n}`;
+    return `{\n${lines.join(', \n')}\n}`;
   }
   if (t === 'arr' || t === 'mat') {
     if (v.length === 0) return '[]';
     lines = v.map(function (it) { return JSON.stringify(it); });
-    return `[\n${lines.join(',\n')}\n]`;
+    return `[\n${lines.join(', \n')}\n]`;
   }
   return JSON.stringify(v);
 }
@@ -238,11 +241,11 @@ function cellRenderer(hot, td, row, col, prop, value, cellProperties) {
   if (value == null || value === '') { td.innerHTML = ''; return; }
   var expanded = !!cellProperties._expanded;
   var display = value;
-  td.title = formatJSON(tryParse(value));
+  var tip = esc(formatJSON(tryParse(value)));
   if (expanded) {
-    td.innerHTML = `<span class="btn cell-btn active">[-]</span><span class="cell-txt">${esc(display)}</span>`;
+    td.innerHTML = `<span class="btn cell-btn active">[-]</span><span class="cell-txt" data-tooltip="${tip}">${esc(display)}</span>`;
   } else {
-    td.innerHTML = `<span class="btn cell-btn">[+]</span><span class="cell-txt">${esc(display)}</span>`;
+    td.innerHTML = `<span class="btn cell-btn">[+]</span><span class="cell-txt" data-tooltip="${tip}">${esc(display)}</span>`;
   }
 }
 
@@ -451,7 +454,7 @@ function buildHot(el) {
     changes.forEach(function (ch) {
       var meta = hot.getCellMeta(ch[0], ch[1]);
       if (meta._slot) { destroySlot(meta._slot); }
-      if (ch[3] != null && typeof tryParse(ch[2]) === 'string') {
+      if (ch[3] != null && ch[2] !== '' && typeof tryParse(ch[2]) === 'string') {
         try {
           var newParsed = JSON.parse(ch[3]);
           if (typeof newParsed !== 'string') ch[3] = JSON.stringify(ch[3]);
@@ -664,9 +667,7 @@ function handleGlobalKeydown(e) {
   if (ctrl && e.key.toLowerCase() === 's') {
     e.preventDefault();
     var data = S.root;
-    var text = (data != null && (typeOf(data) === 'obj' || typeOf(data) === 'arr' || typeOf(data) === 'mat'))
-      ? formatJSON(data)
-      : JSON.stringify(data);
+    var text = JSON.stringify(data, null, 2);
     if (S.sourceUrl) {
       fetch(S.sourceUrl, {
         method: 'PUT',
